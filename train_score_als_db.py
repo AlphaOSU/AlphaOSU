@@ -1,0 +1,395 @@
+import json
+import math
+
+from sklearn.linear_model import BayesianRidge, LinearRegression
+from sklearn.metrics import r2_score, mean_absolute_error
+from tqdm import tqdm
+
+import osu_utils
+from data import data_process
+from data.model import *
+
+
+# score = u^T w b
+# input: x^T w, estimate x
+
+def linear_square(scores, x, weights, epoch, train_from_random):
+    y = scores
+
+    if epoch <= 2:
+        x += np.random.normal(scale=0.01 * (2 - epoch) / 2, size=x.shape)
+
+    if epoch <= 1 and train_from_random:
+        regr = LinearRegression(fit_intercept=False)
+    else:
+        regr = BayesianRidge(fit_intercept=False)
+    regr.fit(x, y, weights)
+    y_pred = regr.predict(x)
+    r2 = r2_score(y, y_pred, sample_weight=weights)
+    mse = mean_absolute_error(y, y_pred, sample_weight=weights)
+    emb = regr.coef_
+    if epoch <= 1:
+        sigma = np.zeros((config.embedding_size, config.embedding_size))
+        alpha = 0.0
+    else:
+        sigma = regr.sigma_
+        alpha = regr.alpha_
+
+    return (emb, sigma, alpha, (r2, mse))
+
+
+speed_to_mod_map = ['HT', 'NM', 'DT']
+
+
+def get_user_train_data(user_key, weights: ScoreModelWeight,
+                        config: NetworkConfig, connection):
+    user_id, user_mode, user_variant = user_key.split("-")
+    if user_mode != config.game_mode:
+        return None
+    sql = (
+        f"SELECT {Score.BEATMAP_ID}, s.speed, s.score, s.pp, s.accuracy "
+        f"FROM {Score.TABLE_NAME} as s "
+        f"WHERE s.{Score.USER_ID} == {user_id} "
+        f"AND s.{Score.CS} == {user_variant[0]} "
+        f"AND s.{Score.GAME_MODE} == '{config.game_mode}' "
+        f"AND s.{Score.PP} >= 1 "
+        f"AND NOT s.{Score.IS_EZ}")
+    scores = []
+    mod_emb_id = []
+    beatmap_emb_id = []
+    pps = []
+    for x in repository.execute_sql(connection, sql):
+        score = x[2] * 2 if x[1] == -1 else x[2]
+        if score < osu_utils.min_score:
+            continue
+        acc = x[-1]
+        if acc < osu_utils.min_acc:
+            continue
+
+        # scores:
+        beatmap_emb_id.append(weights.beatmap_embedding.key_to_embed_id[str(x[0])])
+        mod_emb_id.append(weights.mod_embedding.key_to_embed_id[speed_to_mod_map[x[1] + 1]])
+        scores.append(
+            osu_utils.map_osu_score(score, real_to_train=True, arctanh=math.atanh, tanh=math.tanh))
+        pps.append(x[3])
+
+        # accs:
+        beatmap_emb_id.append(weights.beatmap_embedding.key_to_embed_id[str(x[0])])
+        mod_emb_id.append(
+            weights.mod_embedding.key_to_embed_id[speed_to_mod_map[x[1] + 1] + "-ACC"])
+        scores.append(
+            osu_utils.map_osu_acc(acc, real_to_train=True, arctanh=math.atanh, tanh=math.tanh))
+        pps.append(x[3])
+    if len(scores) < config.embedding_size:
+        return None
+    pps = np.asarray(pps)
+
+    regression_weights = np.clip(pps / np.mean(pps), 1 / config.pp_weight_clip,
+                                 config.pp_weight_clip)
+    return (np.asarray(scores, dtype=np.float32),
+            np.asarray(beatmap_emb_id, dtype=np.int32),
+            np.asarray(mod_emb_id, dtype=np.int32),
+            regression_weights)
+
+
+def get_beatmap_train_data(beatmap_key, weights: ScoreModelWeight,
+                           config: NetworkConfig, connection):
+    sql = (
+        f"SELECT s.user_id, s.cs, s.speed, s.score, s.accuracy "
+        f"FROM {Score.TABLE_NAME} as s "
+        f"WHERE s.{Score.BEATMAP_ID} == {beatmap_key} "
+        f"AND s.{Score.GAME_MODE} == '{config.game_mode}' "
+        f"AND s.{Score.PP} >= 1 "
+        f"AND NOT s.{Score.IS_EZ}")
+    scores = []
+    mod_emb_id = []
+    user_emb_id = []
+    for x in repository.execute_sql(connection, sql):
+        score = x[3] * 2 if x[2] == -1 else x[3]
+        if score < osu_utils.min_score:
+            print(f"{score}")
+            continue
+        acc = x[-1]
+        if acc < osu_utils.min_acc:
+            continue
+        user_key = f"{x[0]}-{config.game_mode}-{x[1]}k"
+        if user_key not in weights.user_embedding.key_to_embed_id:
+            continue
+
+        # scores
+        user_emb_id.append(weights.user_embedding.key_to_embed_id[user_key])
+        mod_emb_id.append(weights.mod_embedding.key_to_embed_id[speed_to_mod_map[x[2] + 1]])
+        scores.append(
+            osu_utils.map_osu_score(score, real_to_train=True, arctanh=math.atanh, tanh=math.tanh))
+
+        # accs
+        user_emb_id.append(weights.user_embedding.key_to_embed_id[user_key])
+        mod_emb_id.append(
+            weights.mod_embedding.key_to_embed_id[speed_to_mod_map[x[2] + 1] + "-ACC"])
+        scores.append(
+            osu_utils.map_osu_acc(acc, real_to_train=True, arctanh=math.atanh, tanh=math.tanh))
+
+    mod_emb_id = np.asarray(mod_emb_id, dtype=np.int32)
+
+    def get_weight(mod_embedding_int):
+        count = np.sum(mod_emb_id == mod_embedding_int)
+        if count <= 0:
+            return 0
+        else:
+            return np.clip(len(mod_emb_id) / count / 2, 1, 10)
+
+    sample_weights = np.asarray([
+        get_weight(i) for i in weights.mod_embedding.key_to_embed_id.values()
+    ])[mod_emb_id]
+
+    if len(scores) < config.embedding_size:
+        return None
+    return (np.asarray(scores, dtype=np.float32),
+            np.asarray(user_emb_id, dtype=np.int32),
+            mod_emb_id,
+            sample_weights)
+
+
+def get_mod_train_data(mod_key, weights: ScoreModelWeight,
+                       config: NetworkConfig, connection):
+    speed = 0
+    if mod_key.startswith("HT"):
+        speed = -1
+    elif mod_key.startswith("DT"):
+        speed = 1
+    is_acc = False
+    if mod_key.endswith("-ACC"):
+        is_acc = True
+    sql = (
+        f"SELECT s.beatmap_id, s.user_id, s.cs, s.{Score.SCORE}, s.{Score.ACCURACY} "
+        f"FROM {Score.TABLE_NAME} as s "
+        f"WHERE s.{Score.SPEED} == {speed} "
+        f"AND s.{Score.GAME_MODE} == '{config.game_mode}' "
+        f"AND s.{Score.PP} >= 1 "
+        f"AND NOT s.{Score.IS_EZ}")
+    scores = []
+    beatmap_emb_id = []
+    user_emb_id = []
+    for x in repository.execute_sql(connection, sql):
+        beatmap_id, user_id, cs, score, acc = x
+        if speed == -1:
+            score = score * 2
+        if score < osu_utils.min_score or acc < osu_utils.min_acc:
+            continue
+        user_key = f"{user_id}-{config.game_mode}-{cs}k"
+        if user_key not in weights.user_embedding.key_to_embed_id:
+            continue
+        beatmap_key = str(beatmap_id)
+
+        user_emb_id.append(weights.user_embedding.key_to_embed_id[user_key])
+        beatmap_emb_id.append(weights.beatmap_embedding.key_to_embed_id[beatmap_key])
+
+        if is_acc:
+            scores.append(
+                osu_utils.map_osu_acc(acc, real_to_train=True, arctanh=math.atanh, tanh=math.tanh))
+        else:
+            scores.append(osu_utils.map_osu_score(score, real_to_train=True, arctanh=math.atanh,
+                                                  tanh=math.tanh))
+
+    if len(scores) < config.embedding_size:
+        return None
+    return (np.asarray(scores, dtype=np.float32),
+            np.asarray(user_emb_id, dtype=np.int32),
+            np.asarray(beatmap_emb_id, dtype=np.int32),
+            None)
+
+
+class TrainingStatistics:
+
+    def __init__(self, desc, total):
+        self.io_times = []
+        self.r2_list = []
+        self.mse_list = []
+        self.ls_times = []
+        self.desc = desc
+        self.total = total
+
+
+cache = {}
+
+
+def mean(arr):
+    return sum(arr) / len(arr)
+
+
+def train_embedding(key, get_data_method, weights, config, connection, epoch,
+                    embedding_data: EmbeddingData,
+                    training_statistics: TrainingStatistics, pbar,
+                    other_embedding_data: EmbeddingData,
+                    other_embedding_data2: EmbeddingData):
+    time_io = time.time()
+    global cache
+    if key in cache:
+        data = cache[key]
+    else:
+        data = get_data_method(key, weights, config, connection)
+        cache[key] = data
+    if data is None:
+        return None
+    time_io = time.time() - time_io
+
+    scores, other_emb_id, other_emb_id2, regression_weights = data
+    other_embs = other_embedding_data.embeddings[0][other_emb_id]
+    other_embs2 = other_embedding_data2.embeddings[0][other_emb_id2]
+    x = other_embs * other_embs2
+
+    time_ls = time.time()
+    (emb, sigma, alpha, metrics) = linear_square(scores, x, regression_weights, epoch)
+    time_ls = time.time() - time_ls
+
+    emb_id = embedding_data.key_to_embed_id[key]
+    embedding_data.embeddings[0][emb_id] = emb
+    embedding_data.sigma[emb_id] = sigma
+    embedding_data.alpha[emb_id] = alpha
+
+    training_statistics.r2_list.append(metrics[0])
+    training_statistics.mse_list.append(metrics[1])
+    training_statistics.io_times.append(time_io)
+    training_statistics.ls_times.append(time_ls)
+
+    io_time_mean = np.mean(training_statistics.io_times) * 1000
+    ls_time_mean = np.mean(training_statistics.ls_times) * 1000
+    pbar.set_description(f"{training_statistics.desc} io:{io_time_mean:.2f}ms "
+                         f"ls:{ls_time_mean:.2f}ms "
+                         f"r2:{mean(training_statistics.r2_list):.4f} "
+                         f"mse:{mean(training_statistics.mse_list):.4f}")
+
+
+def train_score_by_als(config: NetworkConfig):
+    connection = repository.get_connection()
+
+    weights = data_process.load_weight(config)
+    weights.beatmap_embedding.key_to_embed_id = weights.beatmap_embedding.key_to_embed_id.to_dict()
+    weights.user_embedding.key_to_embed_id = weights.user_embedding.key_to_embed_id.to_dict()
+    weights.mod_embedding.key_to_embed_id = weights.mod_embedding.key_to_embed_id.to_dict()
+
+    with connection:
+        repository.create_index(connection, "score_user", Score.TABLE_NAME, [Score.USER_ID])
+        repository.create_index(connection, "score_beatmap", Score.TABLE_NAME, [Score.BEATMAP_ID])
+    previous_r2 = -10000
+
+    for epoch in range(config.epoch):
+
+        # train beatmap
+        statistics = TrainingStatistics("beatmap", len(weights.beatmap_embedding.key_to_embed_id))
+        pbar = tqdm(weights.beatmap_embedding.key_to_embed_id.keys(), desc=statistics.desc)
+        for beatmap_key in pbar:
+            train_embedding(beatmap_key, get_beatmap_train_data, weights, config, connection, epoch,
+                            weights.beatmap_embedding, statistics, pbar, weights.user_embedding,
+                            weights.mod_embedding)
+
+        # train user
+        statistics = TrainingStatistics("user", len(weights.user_embedding.key_to_embed_id))
+        pbar = tqdm(weights.user_embedding.key_to_embed_id.keys(), desc=statistics.desc)
+        for user_key in pbar:
+            train_embedding(user_key, get_user_train_data, weights, config, connection, epoch,
+                            weights.user_embedding, statistics, pbar, weights.beatmap_embedding,
+                            weights.mod_embedding)
+
+        cur_r2 = mean(statistics.r2_list)
+        if previous_r2 >= cur_r2:
+            break
+        if epoch >= 2:
+            previous_r2 = cur_r2
+            data_process.save_embedding(connection, weights.beatmap_embedding, config,
+                                        BeatmapEmbedding.TABLE_NAME,
+                                        BeatmapEmbedding.ITEM_EMBEDDING)
+            data_process.save_embedding(connection, weights.user_embedding, config,
+                                        UserEmbedding.TABLE_NAME,
+                                        UserEmbedding.EMBEDDING)
+            data_process.save_embedding(connection, weights.mod_embedding, config,
+                                        ModEmbedding.TABLE_NAME,
+                                        ModEmbedding.EMBEDDING)
+            Meta.save(connection, "score_embedding_version",
+                      time.strftime("%Y%m%d%H%M%S", time.localtime(time.time())))
+            connection.commit()
+        # test_score.test_predict_with_sql()
+
+        # train mod
+        # if epoch > 2:
+        #     statistics = TrainingStatistics("mod", len(weights.mod_embedding.key_to_embed_id))
+        #     pbar = tqdm(weights.mod_embedding.key_to_embed_id.keys(), desc=statistics.desc)
+        #     for mod_key in pbar:
+        #         train_embedding(mod_key, get_mod_train_data, weights, config, connection, epoch,
+        #                         weights.mod_embedding, statistics, pbar, weights.user_embedding,
+        #                         weights.beatmap_embedding)
+        #
+        #     def cos_sim(a, b):
+        #         return np.dot(a, b) / (np.linalg.norm(a) + 1e-6) / (np.linalg.norm(b) + 1e-6)
+        #
+        #     for idx_i, i in enumerate(weights.mod_embedding.key_to_embed_id.keys()):
+        #         for idx_j, j in enumerate(weights.mod_embedding.key_to_embed_id.keys()):
+        #             if idx_i <= idx_j:
+        #                 continue
+        #             ii = weights.mod_embedding.key_to_embed_id[i]
+        #             jj = weights.mod_embedding.key_to_embed_id[j]
+        #             sim = cos_sim(weights.mod_embedding.embeddings[0][ii],
+        #                           weights.mod_embedding.embeddings[0][jj])
+        #             print(f"{i} <-> {j}: {sim}  ", end="")
+        #         print()
+
+
+def prepare_var_param(config: NetworkConfig):
+    connection = repository.get_connection()
+    x = repository.select(connection, Score.SCORE, project=[
+        Score.BEATMAP_ID, Score.CS, Score.USER_ID, Score.SCORE, Score.IS_EZ, Score.PP, Score.SPEED,
+        Score.ACCURACY
+    ])
+    data = []
+    for cursor in tqdm(x, total=3750000):
+        bid, cs, uid, score, is_ez, pp, speed, acc = cursor
+        if pp < 1 or is_ez:
+            continue
+        if speed == -1:
+            score = score * 2
+        if score < osu_utils.min_score or acc < osu_utils.min_acc:
+            continue
+        score_std_re = osu_utils.predict_score_std(connection, uid,
+                                                   f"{cs}k",
+                                                   config, bid,
+                                                   ['HT', 'NM', 'DT'][
+                                                       speed + 1])
+        if score_std_re is None:
+            continue
+        predict, var_beatmap, var_user, var_mod = score_std_re
+        score_train = osu_utils.map_osu_score(score, real_to_train=True)
+        data.append((score_train, predict, var_beatmap, var_user, var_mod))
+
+    data = pd.DataFrame(data, columns=['y', 'predict', 'var_b', 'var_u', 'var_m'])
+    data.to_sql("VarTest", connection, if_exists='replace')
+
+def estimate_var_param(config):
+    connection = repository.get_connection()
+    data = pd.read_sql_query("SELECT * FROM VarTest", connection)
+    diff = np.abs(data['y'].to_numpy() - data['predict'].to_numpy())
+    var_b = data['var_b'].to_numpy()
+    var_u = data['var_u'].to_numpy()
+    var_m = data['var_m'].to_numpy()
+    scale = 0.001
+
+    def error(x):
+        b, u, m = list(x / scale)
+        std = np.sqrt(var_b * b + var_u * u + var_m * m)
+        prob = np.mean(diff < std)
+        print(b, u, m, prob)
+        return (0.68269 - prob) ** 2
+
+    from scipy import optimize
+    initial = np.asarray((1 / 3, 1 / 3, 1 / 3))
+
+    optimize.minimize(error, initial * scale)
+
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) > 1:
+        config = NetworkConfig(json.load(open(os.path.join(sys.argv[1], "config.json"))))
+    else:
+        config = NetworkConfig()
+    train_score_by_als(config)
+    # estimate_var_param(config)
