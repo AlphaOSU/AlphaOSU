@@ -5,4 +5,5 @@ python_dateutil
 scikit_learn
 scipy
 tqdm
-xgboost==1.6.2
+xgboost
+xlsxwriter

@@ -31,109 +31,6 @@ def get_beatmap_key_to_info(connection, beatmap_data, config):
     return beatmap_key_to_info
 
 
-# @nb.jit(forceobj=False)
-def view_score_hist():
-    config = NetworkConfig()
-    config.load_beyas = False
-    weights = data_process.load_weight(config)
-    scores, beatmap_data = data_process.load_score_data(config)
-
-    scores = data_process.combine_data(scores, beatmap_data, weights)
-    scores['score'] = osu_utils.map_osu_score(scores['score'].to_numpy(), real_to_train=False)
-
-    user_keys = list(set(scores['user_key'].tolist()))
-    random.shuffle(user_keys)
-
-    beatmap_keys = set(scores['beatmap_key'].tolist())
-    scores.set_index(['user_key', 'beatmap_key'], inplace=True)
-
-    # for _, x in tqdm(scores.iterrows(), total=len(scores)):
-    #     ubkey_to_score[x['user_key'] + x['beatmap_key']] = x['score']
-    #     user_keys.update(x['user_key'])
-    #     beatmap_keys.update(x['beatmap_key'])
-
-    divide = 1000
-    divide2 = 1
-    grid_score_to_pass = [[0, 0] for _ in range(int(np.ceil(500000 / divide)))]
-    bp_num_to_pass = [[0, 0] for _ in range(int(np.ceil(105 / divide2)))]
-    index = set(scores.index)
-    connection = repository.get_connection()
-
-    beatmap_key_to_info = get_beatmap_key_to_info(connection, beatmap_data, config)
-
-    for user_key in tqdm(user_keys):  # ['10702235-mania-4k']: #tqdm(user_keys[:10]):
-        user_id, _, variant = user_key.split('-')
-        user_bp = osu_utils.get_user_bp(connection, user_id, config, variant[0])
-        pps = user_bp.data['pp'].to_numpy()[::-1]
-        # print(pps)
-
-        user_emb_id = int(weights.user_embedding.key_to_embed_id[user_key])
-        user_embedding = weights.user_embedding.embeddings[0][user_emb_id]
-        for beatmap_key in beatmap_keys:
-            od, star, notes, cs = beatmap_key_to_info[beatmap_key]
-            if str(cs) != variant[0]:
-                continue
-            t = (user_key, beatmap_key)
-
-            if t in index:
-                score = scores.loc[t, 'score'] + 1000
-                # pp = scores.loc[t, 'pp']
-                # print('true_pp', pp)
-                passed = 0
-            else:
-                passed = 1
-
-                map_emb_id = int(weights.beatmap_embedding.key_to_embed_id[beatmap_key])
-                beatmap_embedding = weights.beatmap_embedding.embeddings[0][map_emb_id]
-                predict = np.dot(user_embedding[:-1], beatmap_embedding[:-1]) + user_embedding[-1] + \
-                          beatmap_embedding[-1]
-                score = np.clip(osu_utils.map_osu_score(predict, real_to_train=False), 500000 + 1,
-                                1000000 - 1)
-
-                # score = 750000
-
-            # od = 5
-            # star = 6
-            # count_sliders = count_circles = 1000
-            pp = osu_utils.mania_pp(score, od, star, notes)
-            pp_rank = len(pps) - bisect.bisect_left(pps, pp)
-
-            # print(pp, pp_rank)
-            i = int(pp_rank / divide2)
-            if i >= len(grid_score_to_pass):
-                i = len(grid_score_to_pass) - 1
-            elif i < 0:
-                i = 0
-            bp_num_to_pass[i][passed] += 1
-            # print(pp_rank)
-
-            i = int((score - 500000) / divide)
-            if i >= len(grid_score_to_pass):
-                i = len(grid_score_to_pass) - 1
-            elif i < 0:
-                i = 0
-            # print(i, score, grid_score_to_pass)
-            grid_score_to_pass[i][passed] += 1
-    print(grid_score_to_pass)
-    print(bp_num_to_pass)
-
-    x = np.arange(500000, 1000000, divide)
-    y = list(map(lambda x: x[0] / (x[0] + x[1]) if x[0] + x[1] != 0 else 0.0, grid_score_to_pass))
-    print(x, y)
-    plt.plot(x, y)
-    plt.show()
-
-    plt.clf()
-    x = np.arange(0, 105, divide2)
-    y = list(map(lambda x: x[0] / (x[0] + x[1]) if x[0] + x[1] != 0 else 0.0, bp_num_to_pass))
-    print(x, y)
-    plt.plot(x, y)
-
-    plt.show()
-    # plt.hist(scores, bins=100, density=True)
-    # plt.show()
-
-
 def get_not_passed_candidates(conn, config: NetworkConfig, uid, variant, weights: ScoreModelWeight,
                               beatmap_embid_info: dict) -> set:
     user_bp = osu_utils.get_user_bp(conn, uid, config)
@@ -197,7 +94,7 @@ def get_not_passed_candidates(conn, config: NetworkConfig, uid, variant, weights
     if len(not_pass_set) >= 200:
         not_pass_set = set(random.sample(list(not_pass_set), 200))
     for i, bid in enumerate(user_bp.id_of_pp_order_list):
-        (speed, score, pp, star) = user_bp.data[bid]
+        (speed, score, pp, star, score_id) = user_bp.data[bid]
         not_pass_set.add((bid, speed, score, pp, i + 1, True))
     return not_pass_set
 

@@ -1,3 +1,4 @@
+from posixpath import dirname
 from data import repository
 import sqlite3
 import time
@@ -400,10 +401,10 @@ def parse_score_data(scores, beatmap_id, is_in_top_scores):
 
 def measure_time(fun):
     def decorate(*c, **d):
-        start_time = time.time()
+        # start_time = time.time()
         result = fun(*c, **d)
-        end_time = time.time()
-        print(fun.__name__ + ":", end_time - start_time, "s")
+        # end_time = time.time()
+        # print(fun.__name__ + ":", end_time - start_time, "s")
         return result
 
     return decorate
@@ -415,7 +416,7 @@ class NetworkConfig:
         if data_dict is None:
             data_dict = {
                 "game_mode": "mania",
-                "embedding_size": 16,
+                "embedding_size": 15,
                 "embedding_bias": True,
                 "epoch": 200,
                 "early_stop_patient": 5,
@@ -513,44 +514,53 @@ import bisect
 
 
 class BestPerformance:
-    PP_WEIGHT = np.power(0.95, np.arange(0, 100))[::-1]
 
-    def __init__(self):
-        self.data = {}  # id -> speed, score, pp, star
+    def __init__(self, max_length=100):
+        self.data = {}  # id -> speed, score, pp, star, scoreid, cs
         self.pp_order_list = []
         self.id_of_pp_order_list = []
+        self.max_length = max_length
 
-    def update(self, id, speed, score, pp, star, filter_duplicate=True):
+    def update(self, id, speed, score, pp, star, filter_duplicate=True, score_id=None, cs=None):
         if filter_duplicate and id in self.data:
             remove_index = self.id_of_pp_order_list.index(id)
             del self.id_of_pp_order_list[remove_index]
             del self.pp_order_list[remove_index]
 
-        self.data[id] = (speed, score, pp, star)
+        self.data[id] = (speed, score, pp, star, score_id, cs)
         index = bisect.bisect_left(self.pp_order_list, pp)
         self.pp_order_list.insert(index, pp)
         self.id_of_pp_order_list.insert(index, id)
 
-        if len(self.pp_order_list) > 100:
+        if self.max_length is not None and len(self.pp_order_list) > self.max_length:
             remove_id = self.id_of_pp_order_list[0]
             del self.id_of_pp_order_list[0]
             del self.pp_order_list[0]
             del self.data[remove_id]
 
     def get_pp(self):
-        return np.sum(np.asarray(self.pp_order_list) * self.PP_WEIGHT[-len(self.pp_order_list):])
+        pp_len = len(self.pp_order_list)
+        return np.sum(np.asarray(self.pp_order_list) * np.power(0.95, np.arange(0, pp_len))[::-1])
 
     def get_score_pp(self, bid):
         if bid in self.data:
-            return self.data[bid][:3]
-        return None, None, None
+            return self.data[bid][0], self.data[bid][1], self.data[bid][2], self.data[bid][4]
+        return None, None, None, None
 
     def copy(self):
-        new = BestPerformance()
+        new = BestPerformance(self.max_length)
         new.data = self.data.copy()
         new.id_of_pp_order_list = self.id_of_pp_order_list.copy()
         new.pp_order_list = self.pp_order_list.copy()
         return new
+
+def get_pass_model_path(speed):
+    return os.path.join(get_pass_model_dir(speed), f"model")
+
+def get_pass_model_dir(speed):
+    dir_name = os.path.join("result", f"pass_xgboost_{speed}")
+    os.makedirs(dir_name, exist_ok=True)
+    return dir_name
 
 if __name__ == "__main__":
     print(', '.join(NetworkConfig().get_pass_features()))

@@ -45,10 +45,13 @@ def db_to_np2(text):
 # Converts TEXT to np.array when selecting
 # sqlite3.register_converter("NDARRAY", convert_array)
 
-def get_connection():
+def get_connection(deploy=False):
     if not os.path.isdir("result"):
         os.makedirs("result")
-    return sqlite3.Connection(os.path.join("result", "data.db"))
+    if deploy:
+        return sqlite3.Connection(os.path.join("result", "data_deploy.db"))
+    else:
+        return sqlite3.Connection(os.path.join("result", "data.db"))
 
 
 def execute_sql(conn: sqlite3.Connection, sql: str, parameters: Iterable = None):

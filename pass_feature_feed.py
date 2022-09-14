@@ -1,7 +1,7 @@
 from data.model import *
 import math
 
-class PassFeature:
+class PassFeatureFeed:
 
     def __init__(self, config: NetworkConfig, connection: sqlite3.Connection):
         self.config = config
@@ -12,6 +12,7 @@ class PassFeature:
         self.cache_norm = {}
         self.connection = connection
         self.connection.create_function("log", 1, math.log1p)
+        self.min_pc = math.log1p(20_000)
 
     def fetch_feature(self, table_name, projections, where):
         cursor = repository.select(self.connection, table_name,
@@ -20,23 +21,9 @@ class PassFeature:
         names = repository.get_columns_by_cursor(cursor)
         features = np.asarray(cursor.fetchone(), dtype=np.float32)
 
-        if table_name in self.cache_norm:
-            avg, std = self.cache_norm[table_name]
-        else:
-            # get avg and std
-            avg_project = [f"AVG({x})" for x in projections]
-            avg = repository.select_first(self.connection, table_name, avg_project)
-            avg = np.asarray(avg, dtype=np.float32)
-            var_project = [f"AVG(({x} - {avg[i]}) * ({x} - {avg[i]}))" for i, x in
-                           enumerate(projections)]
-            var = repository.select_first(self.connection, table_name, var_project)
-            std = np.sqrt(np.asarray(var, dtype=np.float32))
-            self.cache_norm[table_name] = (avg, std)
+        return features, names
 
-        features_norm = (features - avg) / std
-        return features_norm, names
-
-    def get_user_features(self, uid, variant):
+    def get_user_embedding_features(self, uid, variant):
         if (uid, variant) in self.cache_user:
             return self.cache_user[(uid, variant)]
         # user features
@@ -53,7 +40,7 @@ class PassFeature:
     def get_beatmap_features(self, bid):
         if bid in self.cache_beatmap:
             return self.cache_beatmap[bid]
-        projections = ["Beatmap.CS", "Beatmap.OD", "Beatmap.HP", "Beatmap.HT_STAR", "Beatmap.STAR",
+        projections = ["Beatmap.CS", "Beatmap.HT_STAR", "Beatmap.STAR", "Beatmap.PASS_COUNT * 1.0 / Beatmap.PLAY_COUNT",
                        "Beatmap.DT_STAR", "log(Beatmap.PLAY_COUNT)",
                        "log(Beatmap.LENGTH)", "log(Beatmap.COUNT_CIRCLES)", "log(Beatmap.COUNT_SLIDERS)"]
         where = Beatmap.construct_where(bid)
@@ -75,34 +62,32 @@ class PassFeature:
         self.cache_beatmap_embedding[bid] = result
         return result
 
-
-    def get_mod_features(self, mod):
-        if mod in self.cache_mod:
-            return self.cache_mod[mod]
-        projections = self.config.get_embedding_names(ModEmbedding.EMBEDDING)
-        projections.append(self.config.get_embedding_names(ModEmbedding.EMBEDDING, is_alpha=True))
-        result = self.fetch_feature(ModEmbedding.TABLE_NAME, projections,
-                                    ModEmbedding.construct_where(mod=mod))
-        self.cache_mod[mod] = result
-        return result
-
-    def get_pass_features(self, uid, variant, bid, mod, return_feature_name=False, is_predicting=False):
+    def get_pass_features(self, uid, variant, bid, return_feature_name=False, is_predicting=False):
         features = []
         names = []
-        f, n = self.get_user_features(uid, variant)
-        features.extend(f)
-        names.extend(n)
+
+        f_u, n_u = self.get_user_embedding_features(uid, variant)
+        features.extend(f_u)
+        names.extend(n_u)
+
         f, n = self.get_beatmap_features(bid)
         if is_predicting:
-            f[n.index("log(Beatmap.PLAY_COUNT)")] = 1000
+            pc_index = n.index("log(Beatmap.PLAY_COUNT)")
+            if f[pc_index] < self.min_pc:
+                f[pc_index] = self.min_pc
         features.extend(f)
         names.extend(n)
-        f, n = self.get_beatmap_embedding_features(bid)
-        features.extend(f)
-        names.extend(n)
-        f, n = self.get_mod_features(mod)
-        features.extend(f)
-        names.extend(n)
+
+        f_b, n_b = self.get_beatmap_embedding_features(bid)
+        features.extend(f_b)
+        names.extend(n_b)
+
+        combine_embedding_features = f_u[:-1] * f_b[:-1]
+        combine_embedding_names = [f"combine_{i}" for i in range(len(combine_embedding_features))]
+        features.extend(combine_embedding_features)
+        features.append(np.sum(combine_embedding_features))
+        names.extend(combine_embedding_names)
+        names.append("score")
 
         features = np.asarray(features, dtype=np.float32)
         if return_feature_name:

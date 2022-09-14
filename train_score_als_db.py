@@ -13,19 +13,24 @@ from data.model import *
 # score = u^T w b
 # input: x^T w, estimate x
 
-def linear_square(scores, x, weights, epoch, train_from_random):
+def linear_square(scores, x, weights, epoch, config):
     y = scores
 
-    if epoch <= 2:
-        x += np.random.normal(scale=0.01 * (2 - epoch) / 2, size=x.shape)
+    if epoch <= 3:
+        x += np.random.normal(scale=0.01 * (3 - epoch) / 3, size=x.shape)
 
-    if epoch <= 1 and train_from_random:
+    if epoch <= 1:
         regr = LinearRegression(fit_intercept=False)
     else:
         regr = BayesianRidge(fit_intercept=False)
     regr.fit(x, y, weights)
     y_pred = regr.predict(x)
     r2 = r2_score(y, y_pred, sample_weight=weights)
+    n = len(x)
+    if n > config.embedding_size + 1:
+        r2_adj = 1 - ((1 - r2) * (n - 1)) / (n - config.embedding_size - 1)
+    else:
+        r2_adj = r2
     mse = mean_absolute_error(y, y_pred, sample_weight=weights)
     emb = regr.coef_
     if epoch <= 1:
@@ -35,14 +40,14 @@ def linear_square(scores, x, weights, epoch, train_from_random):
         sigma = regr.sigma_
         alpha = regr.alpha_
 
-    return (emb, sigma, alpha, (r2, mse))
+    return (emb, sigma, alpha, (r2, mse, r2_adj))
 
 
 speed_to_mod_map = ['HT', 'NM', 'DT']
 
 
 def get_user_train_data(user_key, weights: ScoreModelWeight,
-                        config: NetworkConfig, connection):
+                        config: NetworkConfig, connection, epoch):
     user_id, user_mode, user_variant = user_key.split("-")
     if user_mode != config.game_mode:
         return None
@@ -93,7 +98,7 @@ def get_user_train_data(user_key, weights: ScoreModelWeight,
 
 
 def get_beatmap_train_data(beatmap_key, weights: ScoreModelWeight,
-                           config: NetworkConfig, connection):
+                           config: NetworkConfig, connection, epoch):
     sql = (
         f"SELECT s.user_id, s.cs, s.speed, s.score, s.accuracy "
         f"FROM {Score.TABLE_NAME} as s "
@@ -151,7 +156,7 @@ def get_beatmap_train_data(beatmap_key, weights: ScoreModelWeight,
 
 
 def get_mod_train_data(mod_key, weights: ScoreModelWeight,
-                       config: NetworkConfig, connection):
+                       config: NetworkConfig, connection, epoch):
     speed = 0
     if mod_key.startswith("HT"):
         speed = -1
@@ -166,7 +171,8 @@ def get_mod_train_data(mod_key, weights: ScoreModelWeight,
         f"WHERE s.{Score.SPEED} == {speed} "
         f"AND s.{Score.GAME_MODE} == '{config.game_mode}' "
         f"AND s.{Score.PP} >= 1 "
-        f"AND NOT s.{Score.IS_EZ}")
+        f"AND NOT s.{Score.IS_EZ} ")
+    sql += f"AND s.{Score.SCORE_ID} % 30 == {epoch}"
     scores = []
     beatmap_emb_id = []
     user_emb_id = []
@@ -206,6 +212,8 @@ class TrainingStatistics:
         self.r2_list = []
         self.mse_list = []
         self.ls_times = []
+        self.as_times = []
+        self.r2_adj_list = []
         self.desc = desc
         self.total = total
 
@@ -221,14 +229,16 @@ def train_embedding(key, get_data_method, weights, config, connection, epoch,
                     embedding_data: EmbeddingData,
                     training_statistics: TrainingStatistics, pbar,
                     other_embedding_data: EmbeddingData,
-                    other_embedding_data2: EmbeddingData):
+                    other_embedding_data2: EmbeddingData, 
+                    cachable=True):
     time_io = time.time()
     global cache
     if key in cache:
         data = cache[key]
     else:
-        data = get_data_method(key, weights, config, connection)
-        cache[key] = data
+        data = get_data_method(key, weights, config, connection, epoch)
+        if cachable:
+            cache[key] = data
     if data is None:
         return None
     time_io = time.time() - time_io
@@ -239,9 +249,10 @@ def train_embedding(key, get_data_method, weights, config, connection, epoch,
     x = other_embs * other_embs2
 
     time_ls = time.time()
-    (emb, sigma, alpha, metrics) = linear_square(scores, x, regression_weights, epoch)
+    (emb, sigma, alpha, metrics) = linear_square(scores, x, regression_weights, epoch, config)
     time_ls = time.time() - time_ls
 
+    
     emb_id = embedding_data.key_to_embed_id[key]
     embedding_data.embeddings[0][emb_id] = emb
     embedding_data.sigma[emb_id] = sigma
@@ -249,29 +260,41 @@ def train_embedding(key, get_data_method, weights, config, connection, epoch,
 
     training_statistics.r2_list.append(metrics[0])
     training_statistics.mse_list.append(metrics[1])
+    training_statistics.r2_adj_list.append(metrics[2])
     training_statistics.io_times.append(time_io)
     training_statistics.ls_times.append(time_ls)
 
-    io_time_mean = np.mean(training_statistics.io_times) * 1000
-    ls_time_mean = np.mean(training_statistics.ls_times) * 1000
-    pbar.set_description(f"{training_statistics.desc} io:{io_time_mean:.2f}ms "
-                         f"ls:{ls_time_mean:.2f}ms "
-                         f"r2:{mean(training_statistics.r2_list):.4f} "
-                         f"mse:{mean(training_statistics.mse_list):.4f}")
+    time_assign = time.time()
+
+    if len(training_statistics.io_times) % 100 == 0:
+        io_time_mean = np.mean(training_statistics.io_times) * 1000
+        ls_time_mean = np.mean(training_statistics.ls_times) * 1000
+        time_assign = time.time() - time_assign
+        training_statistics.as_times.append(time_assign)
+        as_times_mean = np.mean(training_statistics.as_times) * 1000
+        pbar.set_description(f"[{epoch}] {training_statistics.desc} io:{io_time_mean:.2f}ms "
+                            f"ls:{ls_time_mean:.2f}ms "
+                            f"as:{as_times_mean:.2f}ms "
+                            f"r2:{mean(training_statistics.r2_list):.4f} "
+                            f"r2_adj:{mean(training_statistics.r2_adj_list):.4f} "
+                            f"mse:{mean(training_statistics.mse_list):.4f}")
 
 
 def train_score_by_als(config: NetworkConfig):
     connection = repository.get_connection()
 
+    with connection:
+        repository.execute_sql(connection, f"DROP TABLE IF EXISTS {BeatmapEmbedding.TABLE_NAME}")
+        repository.execute_sql(connection, f"DROP TABLE IF EXISTS {UserEmbedding.TABLE_NAME}")
+        repository.execute_sql(connection, f"DROP TABLE IF EXISTS {ModEmbedding.TABLE_NAME}")
+        repository.create_index(connection, "score_user", Score.TABLE_NAME, [Score.USER_ID])
+        repository.create_index(connection, "score_beatmap", Score.TABLE_NAME, [Score.BEATMAP_ID])
+    previous_r2 = -10000
+
     weights = data_process.load_weight(config)
     weights.beatmap_embedding.key_to_embed_id = weights.beatmap_embedding.key_to_embed_id.to_dict()
     weights.user_embedding.key_to_embed_id = weights.user_embedding.key_to_embed_id.to_dict()
     weights.mod_embedding.key_to_embed_id = weights.mod_embedding.key_to_embed_id.to_dict()
-
-    with connection:
-        repository.create_index(connection, "score_user", Score.TABLE_NAME, [Score.USER_ID])
-        repository.create_index(connection, "score_beatmap", Score.TABLE_NAME, [Score.BEATMAP_ID])
-    previous_r2 = -10000
 
     for epoch in range(config.epoch):
 
@@ -282,6 +305,7 @@ def train_score_by_als(config: NetworkConfig):
             train_embedding(beatmap_key, get_beatmap_train_data, weights, config, connection, epoch,
                             weights.beatmap_embedding, statistics, pbar, weights.user_embedding,
                             weights.mod_embedding)
+        print(pbar.desc)
 
         # train user
         statistics = TrainingStatistics("user", len(weights.user_embedding.key_to_embed_id))
@@ -290,48 +314,48 @@ def train_score_by_als(config: NetworkConfig):
             train_embedding(user_key, get_user_train_data, weights, config, connection, epoch,
                             weights.user_embedding, statistics, pbar, weights.beatmap_embedding,
                             weights.mod_embedding)
+        print(pbar.desc)
 
-        cur_r2 = mean(statistics.r2_list)
+        cur_r2 = mean(statistics.r2_adj_list)
         if previous_r2 >= cur_r2:
             break
-        if epoch >= 2:
-            previous_r2 = cur_r2
-            data_process.save_embedding(connection, weights.beatmap_embedding, config,
-                                        BeatmapEmbedding.TABLE_NAME,
-                                        BeatmapEmbedding.ITEM_EMBEDDING)
-            data_process.save_embedding(connection, weights.user_embedding, config,
-                                        UserEmbedding.TABLE_NAME,
-                                        UserEmbedding.EMBEDDING)
-            data_process.save_embedding(connection, weights.mod_embedding, config,
-                                        ModEmbedding.TABLE_NAME,
-                                        ModEmbedding.EMBEDDING)
-            Meta.save(connection, "score_embedding_version",
-                      time.strftime("%Y%m%d%H%M%S", time.localtime(time.time())))
-            connection.commit()
+        previous_r2 = cur_r2
+        data_process.save_embedding(connection, weights.beatmap_embedding, config,
+                                    BeatmapEmbedding.TABLE_NAME,
+                                    BeatmapEmbedding.ITEM_EMBEDDING)
+        data_process.save_embedding(connection, weights.user_embedding, config,
+                                    UserEmbedding.TABLE_NAME,
+                                    UserEmbedding.EMBEDDING)
+        data_process.save_embedding(connection, weights.mod_embedding, config,
+                                    ModEmbedding.TABLE_NAME,
+                                    ModEmbedding.EMBEDDING)
+        Meta.save(connection, "score_embedding_version",
+                    time.strftime("%Y%m%d%H%M%S", time.localtime(time.time())))
+        connection.commit()
         # test_score.test_predict_with_sql()
 
         # train mod
-        # if epoch > 2:
-        #     statistics = TrainingStatistics("mod", len(weights.mod_embedding.key_to_embed_id))
-        #     pbar = tqdm(weights.mod_embedding.key_to_embed_id.keys(), desc=statistics.desc)
-        #     for mod_key in pbar:
-        #         train_embedding(mod_key, get_mod_train_data, weights, config, connection, epoch,
-        #                         weights.mod_embedding, statistics, pbar, weights.user_embedding,
-        #                         weights.beatmap_embedding)
-        #
-        #     def cos_sim(a, b):
-        #         return np.dot(a, b) / (np.linalg.norm(a) + 1e-6) / (np.linalg.norm(b) + 1e-6)
-        #
-        #     for idx_i, i in enumerate(weights.mod_embedding.key_to_embed_id.keys()):
-        #         for idx_j, j in enumerate(weights.mod_embedding.key_to_embed_id.keys()):
-        #             if idx_i <= idx_j:
-        #                 continue
-        #             ii = weights.mod_embedding.key_to_embed_id[i]
-        #             jj = weights.mod_embedding.key_to_embed_id[j]
-        #             sim = cos_sim(weights.mod_embedding.embeddings[0][ii],
-        #                           weights.mod_embedding.embeddings[0][jj])
-        #             print(f"{i} <-> {j}: {sim}  ", end="")
-        #         print()
+        if epoch >= 2 and epoch <= 15:
+            statistics = TrainingStatistics("mod", len(weights.mod_embedding.key_to_embed_id))
+            pbar = tqdm(weights.mod_embedding.key_to_embed_id.keys(), desc=statistics.desc)
+            for mod_key in pbar:
+                train_embedding(mod_key, get_mod_train_data, weights, config, connection, epoch,
+                                weights.mod_embedding, statistics, pbar, weights.user_embedding,
+                                weights.beatmap_embedding, cachable=False)
+            print(pbar.desc)
+            def cos_sim(a, b):
+                return np.dot(a, b) / (np.linalg.norm(a) + 1e-6) / (np.linalg.norm(b) + 1e-6)
+        
+            for idx_i, i in enumerate(weights.mod_embedding.key_to_embed_id.keys()):
+                for idx_j, j in enumerate(weights.mod_embedding.key_to_embed_id.keys()):
+                    if idx_i <= idx_j:
+                        continue
+                    ii = weights.mod_embedding.key_to_embed_id[i]
+                    jj = weights.mod_embedding.key_to_embed_id[j]
+                    sim = cos_sim(weights.mod_embedding.embeddings[0][ii],
+                                  weights.mod_embedding.embeddings[0][jj])
+                    print(f"{i} <-> {j}: {sim}  ", end="")
+                print()
 
 
 def prepare_var_param(config: NetworkConfig):

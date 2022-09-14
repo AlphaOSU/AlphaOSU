@@ -1,4 +1,5 @@
 import numbers
+from typing import Any, Dict, List, Tuple
 
 import xgboost
 from xgboost import callback
@@ -7,24 +8,27 @@ from tqdm import tqdm
 import osu_utils
 from data import repository
 from data.model import *
-from pass_feature import PassFeature
+from pass_feature_feed import PassFeatureFeed
 from matplotlib import pyplot as plt
 
 
 class PassDataIter(xgboost.core.DataIter):
 
-    def __init__(self, connection: sqlite3.Connection, config: NetworkConfig, start_ratio, end_ratio):
+    def __init__(self, connection: sqlite3.Connection, config: NetworkConfig, start_ratio, end_ratio, speed):
         super().__init__()
         self.connection = connection
         self.config = config
-        self.pass_feature = PassFeature(config, connection)
+        self.pass_feature = PassFeatureFeed(config, connection)
         self.batch_size = 4096 * 16
         self.it = 0
-        self.count = repository.count(connection, CannotPass.TABLE_NAME)
+        self.pass_rate, self.count = repository.select(connection, CannotPass.TABLE_NAME, 
+                                                       [f'AVG({CannotPass.PASS}), COUNT(1)'], 
+                                                       where={CannotPass.SPEED: speed}).fetchone()
         self.data_start = int(self.count * start_ratio)
         self.data_end = int(self.count * end_ratio)
         self.pbar: tqdm = None
         self.reset()
+        self.speed = speed
 
     def reset(self) -> None:
         self.it = 0
@@ -33,19 +37,17 @@ class PassDataIter(xgboost.core.DataIter):
         self.pbar = tqdm(total=(self.data_end - self.data_start) // self.batch_size)
 
     # @measure_time
-    def get_data(self, start, end):
+    def get_data(self, start, end) -> Tuple[np.ndarray, np.ndarray, List[str]]:
         data = repository.select(self.connection, CannotPass.TABLE_NAME, project=[
-            CannotPass.PASS, CannotPass.SPEED, CannotPass.BEATMAP_ID, CannotPass.USER_ID,
-            CannotPass.USER_VARIANT, CannotPass.SCORE
-        ], limit=end - start, offset=start).fetchall()
-
+            CannotPass.PASS, CannotPass.BEATMAP_ID, CannotPass.USER_ID,
+            CannotPass.USER_VARIANT
+        ], where={CannotPass.SPEED: self.speed}, limit=end - start, offset=start).fetchall()
         x = []
         name = None
         y = []
         for d in data:
-            yi, speed, bid, uid, variant, score = d
-            mod = ["HT", "NM", "DT"][speed + 1]
-            xi, ni = self.pass_feature.get_pass_features(uid, variant, bid, mod, name is None)
+            yi, bid, uid, variant = d
+            xi, ni = self.pass_feature.get_pass_features(uid, variant, bid, name is None)
             y.append(yi)
             x.append(xi)
             if name is None:
@@ -54,7 +56,6 @@ class PassDataIter(xgboost.core.DataIter):
         x = np.asarray(x)
         y = np.asarray(y)
         return x, y, name
-
 
     def next(self, input_data) -> int:
         start = self.it * self.batch_size + self.data_start
@@ -70,88 +71,98 @@ class PassDataIter(xgboost.core.DataIter):
         self.pbar.update()
         return 1
 
-def save(model, record=None):
-    path = os.path.join("result", "pass_xgboost")
-    os.makedirs(path, exist_ok=True)
-    model.save_model(os.path.join(path, "model"))
-    model.dump_model(os.path.join(path, "model_dump.txt"))
+def save(model, feature_names, speed, record=None):
+    model.save_model(get_pass_model_path(speed))
+    old = model.feature_names
+    # model.dump_model(get_pass_model_path(speed) + "_dump.txt")
+    model.feature_names = feature_names
+    with open(os.path.join(get_pass_model_dir(speed), "importance.txt"), "w") as f:
+        for k, v in sorted(model.get_fscore().items(), key=lambda x: x[1], reverse=True):
+            f.write(f"{k}\t\t{v}\n")
+    model.feature_names = old
     if record is not None:
         import json
-        with open(os.path.join(path, "log.json"), "w") as f:
+        with open(os.path.join(get_pass_model_dir(speed), "log.json"), "w") as f:
             json.dump(record, f)
 
-class Plotting(callback.TrainingCallback):
-    '''Plot evaluation result during training.  Only for demonstration purpose as it's quite
-    slow to draw.
+class SaveModelCallback(callback.TrainingCallback):
 
-    '''
-    def __init__(self, feature_names):
+    def __init__(self, feature_names: List[str], speed: int, params: Dict[str, Any]):
         super().__init__()
         self.last_time = time.time()
+        self.speed = speed
         self.feature_names = feature_names
+        self.params = params
 
     def _get_key(self, data, metric):
         return f'{data}-{metric}'
 
-    def after_iteration(self, model, epoch, evals_log):
-        old = model.feature_names
-        model.feature_names = self.feature_names
-        i = 0
-        for k, v in sorted(model.get_fscore().items(), key=lambda x: x[1], reverse=True):
-            print(k, v, end="\t\t")
-            if i >= 10:
-                break
-            i += 1
-        print("time:", time.time() - self.last_time)
+    def after_iteration(self, model: xgboost.Booster, epoch, evals_log):
+        t = time.time() - self.last_time
+        save(model, self.feature_names, self.speed, evals_log)
         self.last_time = time.time()
-        save(model, evals_log)
-        model.feature_names = old
+
+        cur_auc = evals_log['eval']['auc'][-1]
+        last_auc = evals_log['eval']['auc'][-2] if len(evals_log['eval']['auc']) > 1 else -1
+        if cur_auc <= last_auc:
+            self.params["learning_rate"] = self.params["learning_rate"] * 0.9
+            model.set_param("learning_rate", self.params["learning_rate"])
+        print(f'time: {t} s, eval auc: {last_auc:.6f} -> {cur_auc:.6f}, lr: {self.params["learning_rate"]}')
         # False to indicate training should not stop.
-        return False
+        return self.params["learning_rate"] <= 0.05
 
 def train(config: NetworkConfig):
     connection = repository.get_connection()
-    train_data = PassDataIter(connection, config, 0.0, 0.8)
-    valid_data = PassDataIter(connection, config, 0.8, 1.0)
-    # train_data = PassDataIter(connection, config, 0.0, 0.1)
-    # valid_data = PassDataIter(connection, config, 0.1, 0.12)
-    _, _, feature_names = train_data.get_data(0, 1)
-    monotone_constraints = [0] * len(feature_names)
-    monotone_constraints[feature_names.index('log(Beatmap.PLAY_COUNT)')] = 1
-    monotone_constraints[feature_names.index(Beatmap.HP)] = -1
 
-    d_train = xgboost.DMatrix(train_data, feature_names=feature_names)
-    d_val = xgboost.DMatrix(valid_data, feature_names=feature_names)
+    for speed in [1, 0, -1]:
+        train_data = PassDataIter(connection, config, 0.0, 0.95, speed)
+        valid_data = PassDataIter(connection, config, 0.95, 1.00, speed)
+        print(f"start training speed = {speed}, size = {train_data.count}, pass rate = {train_data.pass_rate}")
+        # train_data = PassDataIter(connection, config, 0.0, 0.1)
+        # valid_data = PassDataIter(connection, config, 0.1, 0.12)
+        x, y, feature_names = train_data.get_data(0, 1)
+        monotone_constraints = [0] * len(feature_names)
+        monotone_constraints[feature_names.index('log(Beatmap.PLAY_COUNT)')] = 1
 
+        param = {
+            'objective': 'binary:logistic',
+            'eval_metric': ['auc', 'error'],
+            'subsample': 1.0,
+            'learning_rate': 1.0,
+            'monotone_constraints': tuple(monotone_constraints),
+            'tree_method': 'hist',
+            'nthread': 1,
+            'scale_pos_weight': (1 - train_data.pass_rate) / train_data.pass_rate
+        }
+        print('param:', param)
+        print('x[0]:', x)
+        print('y[0]:', y)
+        print('features:', feature_names)
 
-    param = {
-        'objective': 'binary:logistic',
-        'eval_metric': ['auc', 'error'],
-        'subsample': 1.0,
-        'eta': 1.0,
-        'monotone_constraints': tuple(monotone_constraints)
-        # 'verbosity': 3
-    }
+        round = 200
+        d_train = xgboost.DMatrix(train_data, feature_names=feature_names)
+        d_val = xgboost.DMatrix(valid_data, feature_names=feature_names)
+        bst = xgboost.train(param, d_train, round, evals=[(d_train, 'train'), (d_val, 'eval')],
+                            callbacks=[
+                                callback.EarlyStopping(
+                                    5,
+                                    metric_name='auc',
+                                    data_name='eval', maximize=True, save_best=True
+                                ), 
+                                SaveModelCallback(feature_names, speed, param)
+                            ])
+        save(bst, feature_names, speed, None)
 
-    round = 200
-    bst = xgboost.train(param, d_train, round, evals=[(d_train, 'train'), (d_val, 'eval')],
-                        callbacks=[callback.EarlyStopping(
-                            5,
-                            metric_name='auc',
-                            data_name='eval', maximize=True, save_best=True
-                        ), Plotting(feature_names),
-                        callback.LearningRateScheduler(lambda epoch: 1 - epoch / round)])
-    bst.feature_names = feature_names
-    for k, v in sorted(bst.get_fscore().items(), key=lambda x: x[1], reverse=True):
-        print(k, v)
-    save(bst, None)
+        del d_train
+        del d_val
+        del train_data
+        del valid_data
+        del bst
 
-    # for batch_id in tqdm(range(size // seq.batch_size)):
-    #     start = batch_id * seq.batch_size
-    #     end = min(size, start + seq.batch_size)
-    #     x = seq[start:end]
-
-
+        for file in os.listdir(None):
+            if file.startswith("DMatrix"):
+                print("Remove: ", file)
+                os.remove(file)
 
 if __name__ == "__main__":
     try:

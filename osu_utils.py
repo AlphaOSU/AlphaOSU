@@ -52,7 +52,7 @@ def mania_pp(score, od, star, objects, power=np.power, where=np.where, abs=np.ab
     return 0.8 * power(power(base_pp, 1.1) + power(accuracy_pp, 1.1), 1 / 1.1)
 
 
-ep = 0.0001
+ep = 0.2
 
 max_score = 1_000_000
 min_score = 500_000
@@ -68,11 +68,14 @@ b_acc = -k_acc * min_acc - 1 + ep
 
 # @measure_time
 def map_osu_score(score, real_to_train: bool, arctanh=np.arctanh, tanh=np.tanh):
-    global k_score, b_score
+    global k_score, b_score, scale
     if real_to_train:
-        return arctanh(k_score * score + b_score)
+        return arctanh(k_score * np.clip(score, min_score, max_score) + b_score)
+        # return sigmoid(k_score * score + b_score) * 2 - 1
+        # return k_score * score + b_score
     else:
-        return (tanh(score) - b_score) / k_score
+        return np.minimum((tanh(score) - b_score) / k_score, max_score)
+        # return (score - b_score) / k_score
 
 
 def map_osu_acc(acc, real_to_train: bool, arctanh=np.arctanh, tanh=np.tanh):
@@ -173,23 +176,23 @@ WHERE {wheres} AND Beatmap.id == BeatmapEmbedding.id
 
 @measure_time
 def get_user_bp(connection, user_id,
-                config: NetworkConfig):  # return (bid, speed) -> (score, pp)
-    sql = f"""SELECT Beatmap.id, Score.speed, Score.PP, Score.score, Beatmap.{Beatmap.HT_STAR}, 
-Beatmap.{Beatmap.STAR}, Beatmap.{Beatmap.DT_STAR}
+                config: NetworkConfig, max_length=100):  # return (bid, speed) -> (score, pp)
+    sql = f"""SELECT Beatmap.id, Score.speed, Score.PP, Score.score, Score.{Score.SCORE_ID}, Beatmap.{Beatmap.HT_STAR}, 
+Beatmap.{Beatmap.STAR}, Beatmap.{Beatmap.DT_STAR}, Beatmap.{Beatmap.CS}
 FROM Score
 JOIN Beatmap ON Score.beatmap_id == Beatmap.id
 WHERE Score.user_id == "{user_id}" 
 AND Beatmap.game_mode == "{config.game_mode}"
 ORDER BY Score.pp DESC
-LIMIT 130 
 """
+    if max_length is not None:
+        sql += f"LIMIT {max_length + 30}"
     cursor = list(repository.execute_sql(connection, sql).fetchall())
-    user_bp = BestPerformance()
+    user_bp = BestPerformance(max_length)
     for tuple in cursor[::-1]:
-        # embeddings = list(tuple[4:])
-        bid, speed, pp, score, ht_star, nm_star, dt_star = tuple
+        bid, speed, pp, score, score_id, ht_star, nm_star, dt_star, cs = tuple
         star = [ht_star, nm_star, dt_star][speed + 1]
-        user_bp.update(int(bid), int(speed), score, pp, star)  # , embeddings)
+        user_bp.update(int(bid), int(speed), score, pp, star, score_id=score_id, cs=cs)  # , embeddings)
     return user_bp
 
 
@@ -210,11 +213,22 @@ def estimate_user_embedding(user_bp: BestPerformance):
 
 
 if __name__ == "__main__":
-    with repository.get_connection() as conn:
-        bp = get_user_bp(conn, uid, NetworkConfig())
-        print(estimate_user_embedding(bp))
+    # with repository.get_connection() as conn:
+    #     bp = get_user_bp(conn, uid, NetworkConfig())
+    #     print(estimate_user_embedding(bp))
     # print(mania_pp(898231, 9.0, 7.00, 2404 + 57))
     # print(mania_pp(986114, 8.2, 6.40, 2259 + 1349))
     #
     # print(mania_pp(816323, 9, 8.289408218280933, 257 + 1671))
     # print(estimate_star_from_score(603.614, 816323, 257 + 1671, 9))
+
+    # print(mania_pp(1_000_000, 8.0, 5.0, 10000))
+    # print(mania_pp(500_000, 8.0, 5.0, 10000))
+    # print(mania_pp(960_000, 8.0, 5.0, 10000))
+    print(map_osu_score(850000, real_to_train=True))
+    print(map_osu_score(960000, real_to_train=True))
+    print(map_osu_score(990000, real_to_train=True))
+    print(map_osu_score(999000, real_to_train=True))
+    print(map_osu_score(1000000, real_to_train=True))
+
+    print(map_osu_score(1, real_to_train=False))
