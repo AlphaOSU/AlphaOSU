@@ -132,7 +132,7 @@ def check_param(key, expect_type, default=None, list_min_size=0, param_dict=None
 def map_sim_data(record):
     return {
         'id': md5(f"{record['id']}".encode()).hexdigest(), 
-        'userName': record['name'],
+        'username': record['name'],
         'userLink': f"https://osu.ppy.sh/users/{record['id']}/mania",
         'pp': record['pp'],
         'similarity': -record['distance']
