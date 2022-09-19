@@ -7,13 +7,13 @@ from scipy import stats, integrate
 
 class PPRecommender:
 
-    def __init__(self, config: NetworkConfig, connection: sqlite3.Connection):
+    def __init__(self, config: NetworkConfig, connection: sqlite3.Connection, result_path="result"):
         self.pass_feature_feed = PassFeatureFeed(config, connection)
         self.config = config
         self.connection = connection
         self.speed_to_pass_model = {}
         for speed in [-1, 0, 1]:
-            path = get_pass_model_path(speed)
+            path = get_pass_model_path(speed, result_path)
             if os.path.exists(path):
                 self.speed_to_pass_model[speed] = xgboost.Booster(model_file=path)
             else:
@@ -45,41 +45,27 @@ class PPRecommender:
             f"AND UserEmbedding.{UserEmbedding.GAME_MODE} == '{self.config.game_mode}' "
             f"AND UserEmbedding.{UserEmbedding.VARIANT} == '{variant}' "
         )
-        data = []
-        data_uid, data_name, data_pp = [], [], []
         data_embedding = []
+        data = []
         st = time.time()
         for x in cursor:
-            # cur_embedding = np.asarray(x[:self.config.embedding_size])
-            # cur_uid, cur_name, cur_pp = x[-3:]
-            # distance = np.linalg.norm(embedding - cur_embedding)
-            # data.append([cur_uid, cur_name, cur_pp, distance])
-
-            data_embedding.append(x[:self.config.embedding_size])
+            cur_embedding = np.asarray(x[:self.config.embedding_size])
             cur_uid, cur_name, cur_pp = x[-3:]
-            data_uid.append(cur_uid)
-            data_name.append(cur_name)
-            data_pp.append(cur_pp)
+            distance = np.linalg.norm(embedding - cur_embedding)
+            data.append([cur_uid, cur_name, cur_pp, distance])
         data_embedding = np.asarray(data_embedding)
-        distance = np.linalg.norm(embedding.reshape(1, -1) - data_embedding, axis=-1, keepdims=False)
         print(f"similarity: {time.time() - st} s")
 
-        # data_df = pd.DataFrame(data, columns=["id", "name", "pp", "distance"])
-        data_df = pd.DataFrame({
-            "id": data_uid,
-            "name": data_name,
-            "pp": data_pp,
-            "distance": distance
-        })
+        data_df = pd.DataFrame(data, columns=["id", "name", "pp", "distance"])
         data_df.sort_values(by=["distance", "id"], ascending=True, inplace=True)
 
         return data_df
 
     def map_beatmap_name(self, name, version):
         name = name + " - " + version
-        max_length = 60
-        end_length = 20
-        name = name[:max_length - end_length] + "..." + name[-end_length:] if len(name) > max_length else name
+        # max_length = 60
+        # end_length = 20
+        # name = name[:max_length - end_length] + "..." + name[-end_length:] if len(name) > max_length else name
         return name
 
     def recall(self, uid, key_count=[4], beatmap_ids=[]):
@@ -94,7 +80,9 @@ class PPRecommender:
             Beatmap.HT_STAR, Beatmap.STAR, Beatmap.DT_STAR,
             Beatmap.CS, 
             # for name
-            Beatmap.VERSION, Beatmap.NAME
+            Beatmap.VERSION, Beatmap.NAME, Beatmap.SET_ID, 
+            # for validation
+            BeatmapEmbedding.COUNT_HT, BeatmapEmbedding.COUNT_NM, BeatmapEmbedding.COUNT_DT
         ]
         data_list = []
         cursor = []
@@ -115,24 +103,28 @@ class PPRecommender:
             cursor += list(osu_utils.predict_score(self.connection, query_params, self.config.embedding_size, projection=base_projection))
         for x in cursor:
             score, bid, speed, variant, od, count1, count2, \
-            star_ht, star_nm, star_dt, cs, version, name = x[:len(base_projection) + 1]
+            star_ht, star_nm, star_dt, cs, version, name, set_id, \
+            count_ht, count_nm, count_dt = x[:len(base_projection) + 1]
             # print(int(bid))
             if len(beatmap_ids) != 0 and int(bid) not in beatmap_ids:
                 continue
             if speed == 1:
                 star = star_dt
                 mod = 'DT'
+                count = count_dt
             elif speed == 0:
                 star = star_nm
                 mod = 'NM'
+                count = count_nm
             else:
                 star = star_ht
                 mod = 'HT'
+                count = count_ht
             data_list.append([bid, mod, star, score, 0, self.map_beatmap_name(name, version),
-                              od, count1 + count2, speed, variant, cs])
+                              od, count1 + count2, speed, variant, cs, set_id, count])
         data = pd.DataFrame(data_list,
                             columns=['id', "mod", "star", "pred_score", "pred_pp", "name",
-                                     'od', 'count', 'speed', 'variant', 'cs'])
+                                     'od', 'count', 'speed', 'variant', 'cs', 'set_id', 'valid_count'])
         data['pred_score'] = np.round(
             osu_utils.map_osu_score(data['pred_score'].to_numpy(), real_to_train=False)
         ).astype(int)
@@ -164,7 +156,7 @@ class PPRecommender:
         # estimate pp incre
         pass_features = None
         for i, row in enumerate(data.itertuples(name=None)):
-            (bid, mod), star, pred_score, _, _, od, count, speed, variant, _ = row
+            (bid, mod), star, pred_score, _, _, od, count, speed, variant, _, _, _ = row
             # pass rate feature. TODO: too slow!! 200ms
             pass_features, _ = self.pass_feature_feed.get_pass_features(uid, variant, bid, mod,
                                                                         is_predicting=True)
@@ -235,7 +227,8 @@ class PPRecommender:
                                            'true_score', 'true_pp',
                                            'pred_score', 'break_prob',
                                            # 'pred_score (breaking)', 'pred_pp (breaking)',
-                                           'pp_gain (breaking)', 'pass_prob', 'cs',
+                                           'pp_gain (breaking)', 'pass_prob', 'cs', 'set_id', 
+                                           'valid_count', 
                                            'pp_gain_expect', 'pred_pp', 'true_score_id'])
         data.sort_values(by="pp_gain_expect", ascending=False, inplace=True)
         return data

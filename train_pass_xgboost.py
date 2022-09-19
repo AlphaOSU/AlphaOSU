@@ -131,8 +131,7 @@ def train(config: NetworkConfig):
             'learning_rate': 1.0,
             'monotone_constraints': tuple(monotone_constraints),
             'tree_method': 'hist',
-            'nthread': 1,
-            'scale_pos_weight': (1 - train_data.pass_rate) / train_data.pass_rate
+            'nthread': 1
         }
         print('param:', param)
         print('x[0]:', x)

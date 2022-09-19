@@ -94,7 +94,7 @@ def get_not_passed_candidates(conn, config: NetworkConfig, uid, variant, weights
     if len(not_pass_set) >= 200:
         not_pass_set = set(random.sample(list(not_pass_set), 200))
     for i, bid in enumerate(user_bp.id_of_pp_order_list):
-        (speed, score, pp, star, score_id) = user_bp.data[bid]
+        (speed, score, pp, star, score_id, cs) = user_bp.data[bid]
         not_pass_set.add((bid, speed, score, pp, i + 1, True))
     return not_pass_set
 

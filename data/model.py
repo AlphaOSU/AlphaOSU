@@ -49,6 +49,8 @@ class UserEmbedding:
     GAME_MODE = 'game_mode'
     VARIANT = 'variant'
 
+    COUNT = 'count'
+
     EMBEDDING = "embedding"
     EMBEDDING_BAYESIAN = "embedding_beyasian"
 
@@ -78,6 +80,10 @@ class BeatmapEmbedding:
     ITEM_EMBEDDING = "item_embedding"
 
     FINAL_EMBEDDING = "final_embedding"
+
+    COUNT_HT = "count_HT"
+    COUNT_NM = "count_NM"
+    COUNT_DT = "count_DT"
 
     @staticmethod
     def create(conn: sqlite3.Connection):
@@ -454,24 +460,6 @@ class NetworkConfig:
         self.pp_weight_clip = data_dict['pp_weight_clip']
         self.max_recall = data_dict['max_recall']
 
-    def get_pass_features(self, beatmap=True, user=True, mod=True):
-        result = []
-        if beatmap:
-            result += [
-                          Beatmap.CS, Beatmap.OD, Beatmap.HP,
-                          Beatmap.HT_STAR, Beatmap.STAR, Beatmap.DT_STAR,
-                          Beatmap.PASS_COUNT, Beatmap.PLAY_COUNT,
-                          Beatmap.LENGTH, Beatmap.COUNT_CIRCLES, Beatmap.COUNT_SLIDERS
-                      ] + self.get_embedding_names(BeatmapEmbedding.ITEM_EMBEDDING)
-            result.append(self.get_embedding_names(BeatmapEmbedding.ITEM_EMBEDDING, is_alpha=True))
-        if user:
-            result += self.get_embedding_names(UserEmbedding.EMBEDDING)
-            result.append(self.get_embedding_names(UserEmbedding.EMBEDDING, is_alpha=True))
-        if mod:
-            result += self.get_embedding_names(ModEmbedding.EMBEDDING)
-            result.append(self.get_embedding_names(ModEmbedding.EMBEDDING, is_alpha=True))
-        return result
-
     def get_embedding_names(self, name, is_sigma=False, is_alpha=False):
         if is_sigma:
             return name + "_sigma"
@@ -554,11 +542,11 @@ class BestPerformance:
         new.pp_order_list = self.pp_order_list.copy()
         return new
 
-def get_pass_model_path(speed):
-    return os.path.join(get_pass_model_dir(speed), f"model")
+def get_pass_model_path(speed, result_path="result"):
+    return os.path.join(get_pass_model_dir(speed, result_path), f"model")
 
-def get_pass_model_dir(speed):
-    dir_name = os.path.join("result", f"pass_xgboost_{speed}")
+def get_pass_model_dir(speed, result_path="result"):
+    dir_name = os.path.join(result_path, f"pass_xgboost_{speed}")
     os.makedirs(dir_name, exist_ok=True)
     return dir_name
 

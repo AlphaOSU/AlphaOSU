@@ -70,12 +70,6 @@ if __name__ == "__main__":
         register_log_output("test")
         connection = repository.get_connection()
         recommender = PPRecommender(config, connection)
-        
-        for uid in [10500832, 7304075]:
-            name, data = recommender.predict(uid)
-            print("\n\n")
-            print(f"name: [{uid}] {name}")
-            print(data.to_string())
 
         # move db
         with repository.get_connection() as conn:
@@ -88,10 +82,22 @@ if __name__ == "__main__":
             repository.execute_sql(conn, "INSERT INTO BeatmapSearch SELECT id, set_id, name, version, creator FROM Beatmap")
             conn.commit()
 
+            print("Update score count")
+            repository.ensure_column(conn, UserEmbedding.TABLE_NAME, [("count", "integer", 0)])
+            repository.ensure_column(conn, BeatmapEmbedding.TABLE_NAME, [("count_HT", "integer", 0)])
+            repository.ensure_column(conn, BeatmapEmbedding.TABLE_NAME, [("count_NM", "integer", 0)])
+            repository.ensure_column(conn, BeatmapEmbedding.TABLE_NAME, [("count_DT", "integer", 0)])
+            for speed in [-1, 0, 1]:
+                mod = ['HT', 'NM', 'DT'][speed + 1]
+                repository.execute_sql(conn, f"UPDATE BeatmapEmbedding SET count_{mod} = (SELECT COUNT(1) FROM Score WHERE Score.beatmap_id == BeatmapEmbedding.id AND Score.speed == {speed})")
+            repository.execute_sql(conn, "UPDATE UserEmbedding SET count = (SELECT COUNT(1) FROM Score WHERE Score.user_id == UserEmbedding.id AND Score.game_mode == UserEmbedding.game_mode AND (Score.cs || 'k') == UserEmbedding.variant)")
+            conn.commit()
+
             print("VACCUM")
             conn.execute("VACUUM")
 
             print("Move DB")
+            shutil.copyfile(os.path.join("result", "data_deploy.db"), os.path.join("result", "data_deploy_backup.db"))
             shutil.copyfile(os.path.join("result", "data.db"), os.path.join("result", "data_deploy.db"))
 
     except:
