@@ -132,7 +132,7 @@ class PPRecommender:
                                              data['star'].to_numpy(),
                                              data['count'].to_numpy())
         measure_time(data.sort_values)(by="pred_pp", ascending=False, inplace=True)
-        data: pd.DataFrame = data.iloc[:min(200, len(data)), :]
+        data: pd.DataFrame = data.iloc[:min(300, len(data)), :]
         data.set_index(['id', 'mod'], inplace=True)
         print(len(data))
         return data
@@ -150,6 +150,7 @@ class PPRecommender:
         # stage 2: rank precisely with pass rate, break prob, pp recom, etc.
         probable_scores, probable_pps, break_probs, \
         pp_gains, true_scores, true_pps, pass_probs, true_score_ids = [], [], [], [], [], [], [], []
+        true_speeds = []
         pass_feature_list = {-1: [], 0: [], 1: []}
         pass_feature_list_index = {-1: [], 0: [], 1: []}
 
@@ -186,6 +187,7 @@ class PPRecommender:
                     probable_score = round(probable_score)
             true_scores.append(true_score)
             true_pps.append(true_pp)
+            true_speeds.append(true_speed)
             probable_scores.append(probable_score)
             break_probs.append(round(break_prob, 6))
             true_score_ids.append(int(true_score_id) if true_score_id is not None else None)
@@ -219,6 +221,7 @@ class PPRecommender:
         data["pp_gain (breaking)"] = pp_gains
         data['true_score'] = true_scores
         data['true_pp'] = true_pps
+        data['true_speed'] = true_speeds
         data['true_score_id'] = true_score_ids
         data['pp_gain_expect'] = data['pp_gain (breaking)'] * data['break_prob'] * data['pass_prob']
 
@@ -228,7 +231,7 @@ class PPRecommender:
                                            'pred_score', 'break_prob',
                                            # 'pred_score (breaking)', 'pred_pp (breaking)',
                                            'pp_gain (breaking)', 'pass_prob', 'cs', 'set_id', 
-                                           'valid_count', 
+                                           'valid_count', 'true_speed',
                                            'pp_gain_expect', 'pred_pp', 'true_score_id'])
         data.sort_values(by="pp_gain_expect", ascending=False, inplace=True)
         return data
