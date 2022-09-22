@@ -12,7 +12,7 @@ class PassFeatureFeed:
         self.cache_norm = {}
         self.connection = connection
         self.connection.create_function("log", 1, math.log1p)
-        self.min_pc = math.log1p(20_000)
+        self.min_pc = math.log1p(1_000)
 
     def fetch_feature(self, table_name, projections, where):
         cursor = repository.select(self.connection, table_name,

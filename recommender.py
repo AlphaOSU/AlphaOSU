@@ -68,7 +68,7 @@ class PPRecommender:
         # name = name[:max_length - end_length] + "..." + name[-end_length:] if len(name) > max_length else name
         return name
 
-    def recall(self, uid, key_count=[4], beatmap_ids=[]):
+    def recall(self, uid, key_count=[4], beatmap_ids=[], max_star=None, max_size=300, min_star=0):
         # stage 1: recall the maps with the highest possible pp
         base_projection = [
             BeatmapEmbedding.TABLE_NAME + "." + BeatmapEmbedding.BEATMAP_ID,
@@ -120,6 +120,11 @@ class PPRecommender:
                 star = star_ht
                 mod = 'HT'
                 count = count_ht
+            if max_star is not None:
+                if star > max_star:
+                    continue
+            if star < min_star:
+                continue
             data_list.append([bid, mod, star, score, 0, self.map_beatmap_name(name, version),
                               od, count1 + count2, speed, variant, cs, set_id, count])
         data = pd.DataFrame(data_list,
@@ -132,7 +137,7 @@ class PPRecommender:
                                              data['star'].to_numpy(),
                                              data['count'].to_numpy())
         measure_time(data.sort_values)(by="pred_pp", ascending=False, inplace=True)
-        data: pd.DataFrame = data.iloc[:min(300, len(data)), :]
+        data: pd.DataFrame = data.iloc[:min(max_size, len(data)), :]
         data.set_index(['id', 'mod'], inplace=True)
         print(len(data))
         return data
@@ -236,7 +241,7 @@ class PPRecommender:
         data.sort_values(by="pp_gain_expect", ascending=False, inplace=True)
         return data
 
-    def predict(self, uid, key_count=[4], beatmap_ids=[]):
+    def predict(self, uid, key_count=[4], beatmap_ids=[], max_star=None, max_size=300, min_star=0):
         
         st = time.time()
         user_bp = osu_utils.get_user_bp(self.connection, uid, self.config, None)
@@ -245,7 +250,7 @@ class PPRecommender:
             return None
 
         st = time.time()
-        data = self.recall(uid, key_count, beatmap_ids)
+        data = self.recall(uid, key_count, beatmap_ids, max_star, max_size, min_star)
         print(f"Recall time: {time.time() - st}")
 
         st = time.time()
