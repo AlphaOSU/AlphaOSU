@@ -1,6 +1,6 @@
 # AlphaOsu!
 
-Using advanced machine learning technology to help you farm PP in [osu!](https://osu.ppy.sh/)
+Using advanced machine learning technology to help you farm PP in [osu!](https://osu.ppy.sh/) .
 
 Link: https://alphaosu.keytoix.vip/
 
