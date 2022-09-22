@@ -48,12 +48,9 @@ def request_api(api, method, end_point='https://osu.ppy.sh/api/v2/', params=None
 
 
 def auth(params, save_name):
-    params.update({
-        'client_id': 11678,
-        'client_secret': 'vwdFZCHHhViJD5k8alz0PsPa30DdOgzjlhv4V3We',
-        'redirect_uri': 'http://keytoix.vip/mania/api/osu-oauth',
-        'scope': 'public'
-    })
+    with open(os.path.join("data", "secret.json")) as f:
+        secret = json.load(f)
+    params.update(secret)
     auth_data = request_api('token', 'post', end_point='https://osu.ppy.sh/oauth/',
                             params=params)
     auth_data['expire_time'] = time.time() + auth_data['expires_in'] - 3600
