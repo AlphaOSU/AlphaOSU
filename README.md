@@ -4,6 +4,8 @@ Using advanced machine learning technology to help you farm PP in [osu!](https:/
 
 Link: https://alphaosu.keytoix.vip/
 
+Video: https://www.bilibili.com/video/BV1Re4y1t7Xy/
+
 ## Setup environment
 
 ```bash
