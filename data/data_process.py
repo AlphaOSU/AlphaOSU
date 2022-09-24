@@ -1,6 +1,7 @@
 from scipy.stats import ortho_group
 
 from data.model import *
+import random
 
 
 def ensure_embedding_column(conn, table_name, embedding_name, config: NetworkConfig):
@@ -12,6 +13,10 @@ def ensure_embedding_column(conn, table_name, embedding_name, config: NetworkCon
     repository.ensure_column(conn, table_name=table_name,
                              name_type_default=columns)
 
+def seed(source):
+    s = abs(hash(source)) % 2**32
+    np.random.seed(s)
+    random.seed(s)
 
 def load_embedding(table_name, primary_keys, embedding_name, config: NetworkConfig,
                    initializer=None):
@@ -37,6 +42,7 @@ def load_embedding(table_name, primary_keys, embedding_name, config: NetworkConf
         cursor = repository.select(conn, table_name=table_name, project=project)
     for i, tpl in enumerate(cursor):
         primary_values = tpl[:len(primary_keys)]
+        seed(tuple(primary_values))
         embedding = list(tpl[len(primary_keys):len(primary_keys) + embedding_size])
         if config.load_beyas:
             sigma = repository.db_to_np(tpl[-2])

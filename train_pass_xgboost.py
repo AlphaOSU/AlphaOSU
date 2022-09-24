@@ -105,7 +105,7 @@ class SaveModelCallback(callback.TrainingCallback):
         cur_auc = evals_log['eval']['auc'][-1]
         last_auc = evals_log['eval']['auc'][-2] if len(evals_log['eval']['auc']) > 1 else -1
         if cur_auc <= last_auc:
-            self.params["learning_rate"] = self.params["learning_rate"] * 0.9
+            self.params["learning_rate"] = self.params["learning_rate"] * 0.8
             model.set_param("learning_rate", self.params["learning_rate"])
         print(f'time: {t} s, eval auc: {last_auc:.6f} -> {cur_auc:.6f}, lr: {self.params["learning_rate"]}')
         # False to indicate training should not stop.
