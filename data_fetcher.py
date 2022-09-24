@@ -43,7 +43,7 @@ class ProgressControl:
         progress, t = repository.select_first(conn_progress, Task.TABLE_NAME,
                                               project=[Task.TASK_STATE, Task.TASK_TIME],
                                               where={Task.TASK_NAME: self._key})
-        if t + 3 * 24 * 3600 >= time.time():
+        if t + 2 * 24 * 3600 >= time.time():
             return progress
         return default
 
@@ -110,8 +110,8 @@ def fetch_user_ranking(game_mode, variant, max_page=10000, country=None):
                                                   User.ID: user_data[User.ID],
                                                   User.GAME_MODE: user_data[User.GAME_MODE],
                                                   User.VARIANT: user_data[User.VARIANT],
-                                              })
-                user_data[User.DIRTY] = old is None or old != user_data[User.PP]
+                                              })[0]
+                user_data[User.DIRTY] = old is None or abs(float(old) - float(user_data[User.PP])) > 0.1
 
             repository.insert_or_replace(conn_ranking, User.TABLE_NAME, db_data)
             if current_count / total_count > current_page / max_page:
