@@ -1,9 +1,9 @@
 # AlphaOsu!
 
-![https://alphaosu.keytoix.vip/](https://img.shields.io/endpoint?color=blue&url=https%3A%2F%2Falphaosu.keytoix.vip%2Fapi%2Fstatistics%3Ftype%3Duser)
-![https://alphaosu.keytoix.vip/](https://img.shields.io/endpoint?color=orange&url=https%3A%2F%2Falphaosu.keytoix.vip%2Fapi%2Fstatistics%3Ftype%3Drecommend)
-![https://alphaosu.keytoix.vip/](https://img.shields.io/endpoint?color=green&url=https%3A%2F%2Falphaosu.keytoix.vip%2Fapi%2Fstatistics%3Ftype%3Dusage)
-![https://discord.gg/H5VzJxeK4F](https://img.shields.io/discord/1021343109398937610?label=discord&logo=discord&style=social)
+[![](https://img.shields.io/endpoint?color=blue&url=https%3A%2F%2Falphaosu.keytoix.vip%2Fapi%2Fstatistics%3Ftype%3Duser)](https://alphaosu.keytoix.vip/)
+[![](https://img.shields.io/endpoint?color=orange&url=https%3A%2F%2Falphaosu.keytoix.vip%2Fapi%2Fstatistics%3Ftype%3Drecommend)](https://alphaosu.keytoix.vip/)
+[![](https://img.shields.io/endpoint?color=green&url=https%3A%2F%2Falphaosu.keytoix.vip%2Fapi%2Fstatistics%3Ftype%3Dusage)](https://alphaosu.keytoix.vip/)
+[![](https://img.shields.io/discord/1021343109398937610?label=discord&logo=discord&style=social)](https://discord.gg/H5VzJxeK4F)
 
 Using advanced machine learning technology to help you farm PP in [osu!](https://osu.ppy.sh/) .
 
