@@ -105,7 +105,7 @@ class SaveModelCallback(callback.TrainingCallback):
         cur_auc = evals_log['eval']['auc'][-1]
         last_auc = evals_log['eval']['auc'][-2] if len(evals_log['eval']['auc']) > 1 else -1
         if cur_auc <= last_auc:
-            self.params["learning_rate"] = self.params["learning_rate"] * 0.8
+            self.params["learning_rate"] = self.params["learning_rate"] * 0.9
             model.set_param("learning_rate", self.params["learning_rate"])
         print(f'time: {t} s, eval auc: {last_auc:.6f} -> {cur_auc:.6f}, lr: {self.params["learning_rate"]}')
         # False to indicate training should not stop.
@@ -138,13 +138,13 @@ def train(config: NetworkConfig):
         print('y[0]:', y)
         print('features:', feature_names)
 
-        round = 200
+        round = 50
         d_train = xgboost.DMatrix(train_data, feature_names=feature_names)
         d_val = xgboost.DMatrix(valid_data, feature_names=feature_names)
         bst = xgboost.train(param, d_train, round, evals=[(d_train, 'train'), (d_val, 'eval')],
                             callbacks=[
                                 callback.EarlyStopping(
-                                    5,
+                                    20,
                                     metric_name='auc',
                                     data_name='eval', maximize=True, save_best=True
                                 ), 
