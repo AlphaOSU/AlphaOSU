@@ -96,9 +96,17 @@ if __name__ == "__main__":
             print("VACCUM")
             conn.execute("VACUUM")
 
-            print("Move DB")
+            print("Backup")
             shutil.copyfile(os.path.join("result", "data_deploy.db"), os.path.join("result", "data_deploy_backup.db"))
+            for speed in [-1, 0, 1]:
+                shutil.copyfile(get_pass_model_path(speed), get_pass_model_path(speed) + "_backup")
+
+            print("Deploy")
             shutil.copyfile(os.path.join("result", "data.db"), os.path.join("result", "data_deploy.db"))
+            for speed in [-1, 0, 1]:
+                shutil.copyfile(get_pass_model_path(speed) + "_train", get_pass_model_path(speed))
+
+            print("Finish!")
 
     except:
         import traceback
