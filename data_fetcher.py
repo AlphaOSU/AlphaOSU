@@ -279,7 +279,7 @@ def insert_scores(conn, score_db_data):
         }).fetchone()
         if previous_score is None or previous_score[0] < score_dict[Score.SCORE]:
             data.append(score_dict)
-    repository.insert_or_replace(conn, Score.TABLE_NAME, data, or_ignore=True)
+    repository.insert_or_replace(conn, Score.TABLE_NAME, data, or_ignore=False)
 
 
 def apply_speed_on_beatmap(game_mode):
