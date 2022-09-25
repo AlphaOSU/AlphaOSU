@@ -106,6 +106,13 @@ if __name__ == "__main__":
             for speed in [-1, 0, 1]:
                 shutil.copyfile(get_pass_model_path(speed) + "_train", get_pass_model_path(speed))
 
+            try:
+                from post_process import finish
+            except ImportError:
+                def finish():
+                    pass
+            finish()
+
             print("Finish!")
 
     except:
