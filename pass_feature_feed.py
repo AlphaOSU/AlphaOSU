@@ -40,7 +40,7 @@ class PassFeatureFeed:
     def get_beatmap_features(self, bid):
         if bid in self.cache_beatmap:
             return self.cache_beatmap[bid]
-        projections = ["Beatmap.CS", "Beatmap.HT_STAR", "Beatmap.STAR", "Beatmap.PASS_COUNT * 1.0 / Beatmap.PLAY_COUNT",
+        projections = ["Beatmap.CS", "Beatmap.HT_STAR", "Beatmap.STAR", "Beatmap.PASS_COUNT / (Beatmap.PLAY_COUNT + 1.0)",
                        "Beatmap.DT_STAR", "log(Beatmap.PLAY_COUNT)",
                        "log(Beatmap.LENGTH)", "log(Beatmap.COUNT_CIRCLES)", "log(Beatmap.COUNT_SLIDERS)"]
         where = Beatmap.construct_where(bid)

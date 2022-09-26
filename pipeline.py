@@ -118,3 +118,10 @@ if __name__ == "__main__":
     except:
         import traceback
         traceback.print_exc(file=sys.stdout)
+
+        try:
+            from post_process import fail
+        except ImportError:
+            def fail():
+                pass
+            fail()
