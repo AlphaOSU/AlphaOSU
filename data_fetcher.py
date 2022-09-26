@@ -14,7 +14,7 @@ def get_state(key, default):
         progress, t = repository.select_first(conn_progress, Task.TABLE_NAME,
                                               project=[Task.TASK_STATE, Task.TASK_TIME],
                                               where={Task.TASK_NAME: key})
-        if t + 3 * 24 * 3600 >= time.time():
+        if t + 2 * 24 * 3600 >= time.time():
             return progress
         return default
 
@@ -110,8 +110,8 @@ def fetch_user_ranking(game_mode, variant, max_page=10000, country=None):
                                                   User.ID: user_data[User.ID],
                                                   User.GAME_MODE: user_data[User.GAME_MODE],
                                                   User.VARIANT: user_data[User.VARIANT],
-                                              })[0]
-                user_data[User.DIRTY] = old is None or abs(float(old) - float(user_data[User.PP])) > 0.1
+                                              })
+                user_data[User.DIRTY] = old is None or abs(float(old[0]) - float(user_data[User.PP])) > 0.1
 
             repository.insert_or_replace(conn_ranking, User.TABLE_NAME, db_data)
             if current_count / total_count > current_page / max_page:
@@ -139,6 +139,7 @@ def fetch_best_performance(game_mode, max_user=100000):
     progress_control = ProgressControl("fetch_best_performance_%s" % (game_mode), len(user_id_name))
     previous_state = int(progress_control.get_state(-1))
     for i, (user_id, user_name, pp) in enumerate(user_id_name):
+        print(user_id, user_name, pp)
         if i <= previous_state:
             continue
         data = api.request_auth_api("users/%d/scores/best" % user_id, "GET", {
@@ -260,6 +261,7 @@ def fetch_beatmap_top_scores(game_mode, variant, max_beatmap=100000):
                             }], [{
                                 Beatmap.ID: beatmap_id
                             }])
+                    print(beatmap_id, dirty)
                 j += 1
                 with connection:
                     if score_db_data is not None:
@@ -347,6 +349,8 @@ def post_process_db():
                                f"FROM {Beatmap.TABLE_NAME} "
                                f"WHERE {Beatmap.TABLE_NAME}.{Beatmap.ID} == "
                                f"{Score.TABLE_NAME}.{Score.BEATMAP_ID})")
+        # drop task table
+        repository.execute_sql(conn, f"DROP TABLE IF EXISTS {Task.TABLE_NAME}")
 
 
 def fetch():
