@@ -361,42 +361,19 @@ def fetch():
     Task.create(conn_)
 
     try:
-        fetch_user_ranking(game_mode='mania', variant='4k')  # , max_page=10)
-        fetch_user_ranking(game_mode='mania', variant='4k', country="CN")  # , max_page=10)
-        fetch_user_ranking(game_mode='mania', variant='7k')  # , max_page=1)
-        fetch_user_ranking(game_mode='mania', variant='7k', country="CN")  # , country="CN", max_page=1)
+        for variant in ['4k', '7k']:
+            for country in [None, "CN", "US"]:
+                fetch_user_ranking(game_mode='mania', variant=variant, country=country)
+
         fetch_ranked_beatmaps(3)
-        fetch_best_performance(game_mode='mania')  # , max_user=50)
-        fetch_beatmap_top_scores(game_mode='mania', variant='4k')  # , max_beatmap=10)
-        fetch_beatmap_top_scores(game_mode='mania', variant='7k')  # , max_beatmap=10)
-        #
-        # with repository.get_connection() as conn_:
-        #     conn_.execute("DROP TABLE IF EXISTS BeatmapCount")
-        #     conn_.execute("CREATE TABLE BeatmapCount AS SELECT beatmap_id, speed, count(1) as count "
-        #                  "FROM Score GROUP BY beatmap_id, speed")
-        #     conn_.execute("CREATE UNIQUE INDEX BeatmapCountIndex ON BeatmapCount (beatmap_id, speed)")
-        #     conn_.execute(f"CREATE INDEX IF NOT EXISTS score_user ON {Score.TABLE_NAME}({Score.USER_ID})")
-        #     repository.ensure_column(conn_, User.TABLE_NAME, [(User.BP_MEAN_PP, "REAL", None)])
-        #     conn_.execute(f"""UPDATE {User.TABLE_NAME} SET {User.BP_MEAN_PP} = (
-        #         SELECT avg(pp) FROM (
-        #             SELECT Score.pp as pp FROM Score
-        #             JOIN Beatmap ON Score.beatmap_id == Beatmap.id
-        #             WHERE Score.user_id == User.id AND Beatmap.game_mode == User.game_mode
-        #             ORDER BY Score.pp DESC LIMIT 100
-        #         )
-        #     )""")
+        fetch_best_performance(game_mode='mania')
+        fetch_beatmap_top_scores(game_mode='mania', variant='4k')
+        fetch_beatmap_top_scores(game_mode='mania', variant='7k')
         apply_speed_on_beatmap("mania")
         post_process_db()
     except Exception as e:
         print("ERROR: " + str(api.recent_request))
         raise e
-
-    # os.system('zip -r "%s" "%s"' % ("result.zip", "result"))
-
-    # repository.export_db_to_csv(Beatmap.TABLE_NAME, "beatmap.csv")
-    # repository.export_db_to_csv(User.TABLE_NAME, "user.csv")
-    # repository.export_db_to_csv(Score.TABLE_NAME, "score.csv")
-
 
 if __name__ == "__main__":
     fetch()

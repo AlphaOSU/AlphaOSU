@@ -10,7 +10,7 @@ recent_request_time = 0
 DEBUG = False
 REQUEST_MIN_INTERVAL = 1
 
-def request_api(api, method, end_point='https://osu.ppy.sh/api/v2/', params=None, header=None, is_retry=False):
+def request_api(api, method, end_point='https://osu.ppy.sh/api/v2/', params=None, header=None, retry_count=0):
     if params is None:
         params = {}
     if header is None:
@@ -37,12 +37,12 @@ def request_api(api, method, end_point='https://osu.ppy.sh/api/v2/', params=None
         else:
             response = session.post(end_point + api, data=params, timeout=60, headers=header).json()
     except Exception as e:
-        if is_retry:
+        if retry_count >= 5:
             raise e
         session = None
         print("retry...")
-        time.sleep(10)
-        return request_api(api, method, end_point, params, header, is_retry=True)
+        time.sleep(10 + retry_count * 30)
+        return request_api(api, method, end_point, params, header, retry_count + 1)
     recent_request += " -> " + str(response)
     return response
 
