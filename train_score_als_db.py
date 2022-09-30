@@ -52,7 +52,7 @@ def get_user_train_data(user_key, weights: ScoreModelWeight,
     if user_mode != config.game_mode:
         return None
     sql = (
-        f"SELECT {Score.BEATMAP_ID}, s.speed, s.score, s.pp, s.accuracy "
+        f"SELECT {Score.BEATMAP_ID}, s.speed, s.score, s.pp, s.{Score.CUSTOM_ACCURACY} "
         f"FROM {Score.TABLE_NAME} as s "
         f"WHERE s.{Score.USER_ID} == {user_id} "
         f"AND s.{Score.CS} == {user_variant[0]} "
@@ -100,7 +100,7 @@ def get_user_train_data(user_key, weights: ScoreModelWeight,
 def get_beatmap_train_data(beatmap_key, weights: ScoreModelWeight,
                            config: NetworkConfig, connection, epoch):
     sql = (
-        f"SELECT s.user_id, s.cs, s.speed, s.score, s.accuracy "
+        f"SELECT s.user_id, s.cs, s.speed, s.score, s.{Score.CUSTOM_ACCURACY} "
         f"FROM {Score.TABLE_NAME} as s "
         f"WHERE s.{Score.BEATMAP_ID} == {beatmap_key} "
         f"AND s.{Score.GAME_MODE} == '{config.game_mode}' "
@@ -166,7 +166,7 @@ def get_mod_train_data(mod_key, weights: ScoreModelWeight,
     if mod_key.endswith("-ACC"):
         is_acc = True
     sql = (
-        f"SELECT s.beatmap_id, s.user_id, s.cs, s.{Score.SCORE}, s.{Score.ACCURACY} "
+        f"SELECT s.beatmap_id, s.user_id, s.cs, s.{Score.SCORE}, s.{Score.CUSTOM_ACCURACY} "
         f"FROM {Score.TABLE_NAME} as s "
         f"WHERE s.{Score.SPEED} == {speed} "
         f"AND s.{Score.GAME_MODE} == '{config.game_mode}' "
@@ -358,11 +358,24 @@ def train_score_by_als(config: NetworkConfig):
                 print()
 
 
+def update_score_count(conn):
+    print("Update score count")
+    repository.ensure_column(conn, UserEmbedding.TABLE_NAME, [("count", "integer", 0)])
+    repository.ensure_column(conn, BeatmapEmbedding.TABLE_NAME, [("count_HT", "integer", 0)])
+    repository.ensure_column(conn, BeatmapEmbedding.TABLE_NAME, [("count_NM", "integer", 0)])
+    repository.ensure_column(conn, BeatmapEmbedding.TABLE_NAME, [("count_DT", "integer", 0)])
+    for speed in [-1, 0, 1]:
+        mod = ['HT', 'NM', 'DT'][speed + 1]
+        repository.execute_sql(conn, f"UPDATE BeatmapEmbedding SET count_{mod} = (SELECT COUNT(1) FROM Score WHERE Score.beatmap_id == BeatmapEmbedding.id AND Score.speed == {speed})")
+    repository.execute_sql(conn, "UPDATE UserEmbedding SET count = (SELECT COUNT(1) FROM Score WHERE Score.user_id == UserEmbedding.id AND Score.game_mode == UserEmbedding.game_mode AND (Score.cs || 'k') == UserEmbedding.variant)")
+    conn.commit()
+
+
 def prepare_var_param(config: NetworkConfig):
     connection = repository.get_connection()
     x = repository.select(connection, Score.SCORE, project=[
         Score.BEATMAP_ID, Score.CS, Score.USER_ID, Score.SCORE, Score.IS_EZ, Score.PP, Score.SPEED,
-        Score.ACCURACY
+        Score.CUSTOM_ACCURACY
     ])
     data = []
     for cursor in tqdm(x, total=3750000):

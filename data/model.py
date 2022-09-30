@@ -225,6 +225,8 @@ class Score:
     GAME_MODE = "game_mode"
     CS = "cs"
 
+    CUSTOM_ACCURACY = "custom_accuracy"
+
     @staticmethod
     def create(conn: sqlite3.Connection):
         repository.create_table(conn, table_name=Score.TABLE_NAME, columns={
@@ -532,8 +534,8 @@ class BestPerformance:
 
     def get_score_pp(self, bid):
         if bid in self.data:
-            return self.data[bid][0], self.data[bid][1], self.data[bid][2], self.data[bid][4]
-        return None, None, None, None
+            return self.data[bid][0], self.data[bid][1], self.data[bid][2], self.data[bid][3], self.data[bid][4]
+        return None, None, None, None, None
 
     def copy(self):
         new = BestPerformance(self.max_length)
@@ -550,5 +552,3 @@ def get_pass_model_dir(speed, result_path="result"):
     os.makedirs(dir_name, exist_ok=True)
     return dir_name
 
-if __name__ == "__main__":
-    print(', '.join(NetworkConfig().get_pass_features()))

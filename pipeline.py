@@ -59,6 +59,8 @@ if __name__ == "__main__":
 
         register_log_output("train_score")
         train_score_als_db.train_score_by_als(config)
+        with repository.get_connection() as conn:
+            train_score_als_db.update_score_count(conn)
 
         register_log_output("prepare_not_passed_candidates")
         prepare_pass_data.prepare_not_passed_candidates(config)
@@ -80,17 +82,6 @@ if __name__ == "__main__":
             repository.execute_sql(conn, "DROP TABLE IF EXISTS BeatmapSearch")
             repository.execute_sql(conn, "CREATE VIRTUAL TABLE IF NOT EXISTS BeatmapSearch USING fts4(id, set_id, name, version, creator)")
             repository.execute_sql(conn, "INSERT INTO BeatmapSearch SELECT id, set_id, name, version, creator FROM Beatmap")
-            conn.commit()
-
-            print("Update score count")
-            repository.ensure_column(conn, UserEmbedding.TABLE_NAME, [("count", "integer", 0)])
-            repository.ensure_column(conn, BeatmapEmbedding.TABLE_NAME, [("count_HT", "integer", 0)])
-            repository.ensure_column(conn, BeatmapEmbedding.TABLE_NAME, [("count_NM", "integer", 0)])
-            repository.ensure_column(conn, BeatmapEmbedding.TABLE_NAME, [("count_DT", "integer", 0)])
-            for speed in [-1, 0, 1]:
-                mod = ['HT', 'NM', 'DT'][speed + 1]
-                repository.execute_sql(conn, f"UPDATE BeatmapEmbedding SET count_{mod} = (SELECT COUNT(1) FROM Score WHERE Score.beatmap_id == BeatmapEmbedding.id AND Score.speed == {speed})")
-            repository.execute_sql(conn, "UPDATE UserEmbedding SET count = (SELECT COUNT(1) FROM Score WHERE Score.user_id == UserEmbedding.id AND Score.game_mode == UserEmbedding.game_mode AND (Score.cs || 'k') == UserEmbedding.variant)")
             conn.commit()
 
             print("VACCUM")

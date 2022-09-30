@@ -339,9 +339,11 @@ def apply_speed_on_beatmap(game_mode):
 
 def post_process_db():
     with repository.get_connection() as conn:
+        # insert game_mode and cs into Score
         repository.ensure_column(conn, Score.TABLE_NAME, [
             (Score.GAME_MODE, "TEXT", None),
             (Score.CS, "INTEGER", None),
+            (Score.CUSTOM_ACCURACY, "FLOAT", None),
         ])
         repository.execute_sql(conn,
                                f"UPDATE {Score.TABLE_NAME} SET ({Score.GAME_MODE}, {Score.CS}) = "
@@ -349,6 +351,21 @@ def post_process_db():
                                f"FROM {Beatmap.TABLE_NAME} "
                                f"WHERE {Beatmap.TABLE_NAME}.{Beatmap.ID} == "
                                f"{Score.TABLE_NAME}.{Score.BEATMAP_ID})")
+        # update custom acc for mania
+        weight_mania = {
+            Score.COUNT_geki: 320,
+            Score.COUNT_300: 300,
+            Score.COUNT_katu: 200,
+            Score.COUNT_100: 100,
+            Score.COUNT_50: 50,
+            Score.COUNT_miss: 0,
+        }
+        custom_acc_sum = " + ".join([f"{k} * {v}" for k, v in weight_mania.items()])
+        custom_acc_total = " + ".join(weight_mania.keys())
+        repository.execute_sql(conn,
+                               f"UPDATE {Score.TABLE_NAME} "
+                               f"SET {Score.CUSTOM_ACCURACY} = ({custom_acc_sum}) * 1.0 / ({custom_acc_total}) / 320 "
+                               f"WHERE {Score.GAME_MODE} == 'mania'")
         # drop task table
         repository.execute_sql(conn, f"DROP TABLE IF EXISTS {Task.TABLE_NAME}")
 

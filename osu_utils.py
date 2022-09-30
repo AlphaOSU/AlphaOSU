@@ -52,6 +52,13 @@ def mania_pp(score, od, star, objects, power=np.power, where=np.where, abs=np.ab
     return 0.8 * power(power(base_pp, 1.1) + power(accuracy_pp, 1.1), 1 / 1.1)
 
 
+def mania_pp_v4(custom_acc, star, objects, power=np.power, max=np.maximum, min=np.minimum):
+    diff_pp = power(max(star - 0.15, 0.05), 2.2)
+    acc_pp = max(5 * custom_acc - 4, 0)
+    length_pp = 1 + 0.1 * min(1.0, objects / 1500)
+    return 8 * diff_pp * acc_pp * length_pp
+
+
 ep = 0.2
 
 max_score = 1_000_000
@@ -84,7 +91,6 @@ def map_osu_acc(acc, real_to_train: bool, arctanh=np.arctanh, tanh=np.tanh):
         return arctanh(k_acc * acc + b_acc)
     else:
         return (tanh(acc) - b_acc) / k_acc
-
 
 
 def predict_score_std(connection, uid, variant, config: NetworkConfig, bid, mod):
@@ -176,8 +182,12 @@ WHERE {wheres} AND Beatmap.id == BeatmapEmbedding.id
 
 @measure_time
 def get_user_bp(connection, user_id,
-                config: NetworkConfig, max_length=100):  # return (bid, speed) -> (score, pp)
-    sql = f"""SELECT Beatmap.id, Score.speed, Score.PP, Score.score, Score.{Score.SCORE_ID}, Beatmap.{Beatmap.HT_STAR}, 
+                config: NetworkConfig, max_length=100, is_acc=False):  # return (bid, speed) -> (score, pp)
+    if is_acc:
+        score = Score.CUSTOM_ACCURACY
+    else:
+        score = Score.SCORE
+    sql = f"""SELECT Beatmap.id, Score.speed, Score.PP, Score.{score}, Score.{Score.SCORE_ID}, Beatmap.{Beatmap.HT_STAR}, 
 Beatmap.{Beatmap.STAR}, Beatmap.{Beatmap.DT_STAR}, Beatmap.{Beatmap.CS}
 FROM Score
 JOIN Beatmap ON Score.beatmap_id == Beatmap.id
@@ -192,7 +202,8 @@ ORDER BY Score.pp DESC
     for tuple in cursor[::-1]:
         bid, speed, pp, score, score_id, ht_star, nm_star, dt_star, cs = tuple
         star = [ht_star, nm_star, dt_star][speed + 1]
-        user_bp.update(int(bid), int(speed), score, pp, star, score_id=score_id, cs=cs)  # , embeddings)
+        user_bp.update(int(bid), int(speed), score, pp, star, score_id=score_id,
+                       cs=cs)  # , embeddings)
     return user_bp
 
 
@@ -222,13 +233,17 @@ if __name__ == "__main__":
     # print(mania_pp(816323, 9, 8.289408218280933, 257 + 1671))
     # print(estimate_star_from_score(603.614, 816323, 257 + 1671, 9))
 
-    # print(mania_pp(1_000_000, 8.0, 5.0, 10000))
-    # print(mania_pp(500_000, 8.0, 5.0, 10000))
-    # print(mania_pp(960_000, 8.0, 5.0, 10000))
-    print(map_osu_score(850000, real_to_train=True))
-    print(map_osu_score(960000, real_to_train=True))
-    print(map_osu_score(990000, real_to_train=True))
-    print(map_osu_score(999000, real_to_train=True))
-    print(map_osu_score(1000000, real_to_train=True))
+    print(mania_pp(1_000_000, 8.0, 5.0, 10000))
+    print(mania_pp(500_000, 8.0, 5.0, 10000))
+    print(mania_pp(960_000, 8.0, 5.0, 10000))
 
-    print(map_osu_score(1, real_to_train=False))
+    print(mania_pp_v4(1, 5.0, 10000))
+    print(mania_pp_v4(0.9, 5.0, 10000))
+    print(mania_pp_v4(0.8, 5.0, 10000))
+    # print(map_osu_score(850000, real_to_train=True))
+    # print(map_osu_score(960000, real_to_train=True))
+    # print(map_osu_score(990000, real_to_train=True))
+    # print(map_osu_score(999000, real_to_train=True))
+    # print(map_osu_score(1000000, real_to_train=True))
+    #
+    # print(map_osu_score(1, real_to_train=False))

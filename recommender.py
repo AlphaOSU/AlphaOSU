@@ -5,16 +5,87 @@ import xgboost
 from scipy import stats, integrate
 import bisect
 
+from abc import abstractmethod, ABCMeta
+
+
+class PPRuleSet(metaclass=ABCMeta):
+    @abstractmethod
+    def post_process_query_param(self, query_params: dict): pass
+
+    @abstractmethod
+    def train_to_real(self, x): pass
+
+    @abstractmethod
+    def real_to_train(self, x): pass
+
+    @abstractmethod
+    def pp(self, x, star, od, count): pass
+
+    @abstractmethod
+    def user_bp(self, connection, uid, config): pass
+
+    def map_mod(self, mod):
+        return mod
+
+
+class ManiaPPV3(PPRuleSet):
+
+    def post_process_query_param(self, query_params: dict):
+        query_params[ModEmbedding.TABLE_NAME + "." + ModEmbedding.IS_ACC] = ('=', '0')
+
+    def train_to_real(self, x):
+        return np.round(
+            osu_utils.map_osu_score(x, real_to_train=False)
+        ).astype(int)
+
+    def real_to_train(self, x):
+        return osu_utils.map_osu_score(x, real_to_train=True)
+
+    def pp(self, x, star, od, count):
+        return osu_utils.mania_pp(x, od, star, count)
+
+    def user_bp(self, connection, uid, config):
+        return osu_utils.get_user_bp(connection, uid, config, is_acc=False)
+
+
+class ManiaPPV4(PPRuleSet):
+
+    def post_process_query_param(self, query_params: dict):
+        query_params[ModEmbedding.TABLE_NAME + "." + ModEmbedding.IS_ACC] = ('=', '1')
+
+    def train_to_real(self, x):
+        return osu_utils.map_osu_acc(x, real_to_train=False)
+
+    def real_to_train(self, x):
+        return osu_utils.map_osu_acc(x, real_to_train=True)
+
+    def pp(self, x, star, od, count):
+        return osu_utils.mania_pp_v4(x, star, count)
+
+    def user_bp(self, connection, uid, config):
+        return osu_utils.get_user_bp(connection, uid, config, is_acc=True)
+
+    def map_mod(self, mod):
+        return mod + "-ACC"
+
 
 class PPRecommender:
 
-    def __init__(self, config: NetworkConfig, connection: sqlite3.Connection, result_path="result"):
+    def __init__(self, config: NetworkConfig, connection: sqlite3.Connection, result_path="result",
+                 rule=3):
         self.pass_feature_feed = PassFeatureFeed(config, connection)
         self.config = config
         self.connection = connection
         self.speed_to_pass_model = {}
+        if rule == 3:
+            self.pp_rule_set: PPRuleSet = ManiaPPV3()
+        elif rule == 4:
+            self.pp_rule_set: PPRuleSet = ManiaPPV4()
+        else:
+            raise
+
         for speed in [-1, 0, 1]:
-            path = get_pass_model_path(speed, result_path)
+            path = get_pass_model_path(speed, result_path) + "_train"
             if os.path.exists(path):
                 self.speed_to_pass_model[speed] = xgboost.Booster(model_file=path)
             else:
@@ -22,7 +93,7 @@ class PPRecommender:
                 self.speed_to_pass_model[speed] = None
 
     def similarity(self, uid, variant):
-        
+
         project = self.config.get_embedding_names(UserEmbedding.EMBEDDING)
 
         embedding = repository.select_first(self.connection, UserEmbedding.TABLE_NAME,
@@ -69,7 +140,7 @@ class PPRecommender:
         # name = name[:max_length - end_length] + "..." + name[-end_length:] if len(name) > max_length else name
         return name
 
-    def recall(self, uid, key_count=[4], beatmap_ids=[], max_star=None, max_size=300, min_star=0, 
+    def recall(self, uid, key_count=[4], beatmap_ids=[], max_star=None, max_size=300, min_star=0,
                min_pp=None):
         # stage 1: recall the maps with the highest possible pp
         base_projection = [
@@ -80,9 +151,9 @@ class PPRecommender:
             Beatmap.COUNT_SLIDERS,
             Beatmap.COUNT_CIRCLES,
             Beatmap.HT_STAR, Beatmap.STAR, Beatmap.DT_STAR,
-            Beatmap.CS, 
+            Beatmap.CS,
             # for name
-            Beatmap.VERSION, Beatmap.NAME, Beatmap.SET_ID, 
+            Beatmap.VERSION, Beatmap.NAME, Beatmap.SET_ID,
             # for validation
             BeatmapEmbedding.COUNT_HT, BeatmapEmbedding.COUNT_NM, BeatmapEmbedding.COUNT_DT
         ]
@@ -91,18 +162,22 @@ class PPRecommender:
         query_params = {
             UserEmbedding.TABLE_NAME + "." + UserEmbedding.USER_ID: ('=', uid),
             UserEmbedding.TABLE_NAME + "." + UserEmbedding.GAME_MODE: ('=', self.config.game_mode),
-            ModEmbedding.TABLE_NAME + "." + ModEmbedding.IS_ACC: ('=', '0')
         }
+        self.pp_rule_set.post_process_query_param(query_params)
         if len(beatmap_ids) != 0:
             beatmap_ids = set(beatmap_ids)
         if 4 in key_count:
             query_params[UserEmbedding.TABLE_NAME + "." + UserEmbedding.VARIANT] = ('=', '4k')
             query_params[Beatmap.CS] = ('=', 4)
-            cursor += list(osu_utils.predict_score(self.connection, query_params, self.config.embedding_size, projection=base_projection))
+            cursor += list(
+                osu_utils.predict_score(self.connection, query_params, self.config.embedding_size,
+                                        projection=base_projection))
         if 7 in key_count:
             query_params[UserEmbedding.TABLE_NAME + "." + UserEmbedding.VARIANT] = ('=', '7k')
             query_params[Beatmap.CS] = ('=', 7)
-            cursor += list(osu_utils.predict_score(self.connection, query_params, self.config.embedding_size, projection=base_projection))
+            cursor += list(
+                osu_utils.predict_score(self.connection, query_params, self.config.embedding_size,
+                                        projection=base_projection))
         for x in cursor:
             score, bid, speed, variant, od, count1, count2, \
             star_ht, star_nm, star_dt, cs, version, name, set_id, \
@@ -131,13 +206,13 @@ class PPRecommender:
                               od, count1 + count2, speed, variant, cs, set_id, count])
         data = pd.DataFrame(data_list,
                             columns=['id', "mod", "star", "pred_score", "pred_pp", "name",
-                                     'od', 'count', 'speed', 'variant', 'cs', 'set_id', 'valid_count'])
-        data['pred_score'] = np.round(
-            osu_utils.map_osu_score(data['pred_score'].to_numpy(), real_to_train=False)
-        ).astype(int)
-        data['pred_pp'] = osu_utils.mania_pp(data['pred_score'].to_numpy(), data['od'].to_numpy(),
-                                             data['star'].to_numpy(),
-                                             data['count'].to_numpy())
+                                     'od', 'count', 'speed', 'variant', 'cs', 'set_id',
+                                     'valid_count'])
+        data['pred_score'] = self.pp_rule_set.train_to_real(data['pred_score'].to_numpy())
+        data['pred_pp'] = self.pp_rule_set.pp(data['pred_score'].to_numpy(),
+                                              data['star'].to_numpy(),
+                                              data['od'].to_numpy(),
+                                              data['count'].to_numpy())
         measure_time(data.sort_values)(by="pred_pp", ascending=False, inplace=True)
 
         if min_pp is not None:
@@ -158,7 +233,7 @@ class PPRecommender:
             # print(x)
             prob = np.exp(-(x - pred_score) ** 2 / (2 * pred_score_std ** 2)) / (
                     pred_score_std * np.sqrt(2 * np.pi))
-            x_real = osu_utils.map_osu_score(x, real_to_train=False)
+            x_real = self.pp_rule_set.train_to_real(x)
             return prob * x_real
 
         # stage 2: rank precisely with pass rate, break prob, pp recom, etc.
@@ -169,7 +244,6 @@ class PPRecommender:
         pass_feature_list_index = {-1: [], 0: [], 1: []}
 
         # estimate pp incre
-        pass_features = None
         for i, row in enumerate(data.itertuples(name=None)):
             (bid, mod), star, pred_score, _, _, od, count, speed, variant, _, _, _ = row
             # pass rate feature. TODO: too slow!! 200ms
@@ -178,27 +252,28 @@ class PPRecommender:
             pass_feature_list[speed].append(pass_features)
             pass_feature_list_index[speed].append(i)
             # break prob
-            true_speed, true_score, true_pp, true_score_id = user_bp.get_score_pp(bid)
+            true_speed, true_score, true_pp, true_star, true_score_id = user_bp.get_score_pp(bid)
+            if true_score is not None:
+                true_pp = self.pp_rule_set.pp(true_score, true_star, od, count)
             if true_score is None:
                 break_prob = 1.0
                 probable_score = pred_score
             else:
-                true_score = int(round(true_score))
                 std_result = osu_utils.predict_score_std(self.connection, uid,
-                                                         variant, self.config, bid, mod)
+                                                         variant, self.config, bid,
+                                                         self.pp_rule_set.map_mod(mod))
                 if std_result is None or true_speed != speed:
                     probable_score = pred_score
                     break_prob = 1.0
                 else:
                     score_train, score_std_train = std_result
-                    true_score_train = osu_utils.map_osu_score(true_score, real_to_train=True)
+                    true_score_train = self.pp_rule_set.real_to_train(true_score)
                     break_prob = 1 - stats.norm.cdf(true_score_train, loc=score_train,
                                                     scale=score_std_train)
                     probable_score = \
-                    integrate.quad(score_with_prob, a=true_score_train, b=np.inf,
-                                   args=(score_train, score_std_train),
-                                   epsabs=1.0)[0] / break_prob
-                    probable_score = round(probable_score)
+                        integrate.quad(score_with_prob, a=true_score_train, b=np.inf,
+                                       args=(score_train, score_std_train),
+                                       epsabs=1.0)[0] / break_prob
             true_scores.append(true_score)
             true_pps.append(true_pp)
             true_speeds.append(true_speed)
@@ -207,8 +282,7 @@ class PPRecommender:
             true_score_ids.append(int(true_score_id) if true_score_id is not None else None)
             # pp gain
             if probable_score is not None:
-                pp_gain_beatmap = osu_utils.mania_pp(probable_score, od, star,
-                                                     count)
+                pp_gain_beatmap = self.pp_rule_set.pp(probable_score, star, od, count)
                 pp_gain_beatmap = round(pp_gain_beatmap, 3)
                 probable_pps.append(pp_gain_beatmap)
                 user_bp2 = user_bp.copy()
@@ -219,7 +293,7 @@ class PPRecommender:
             else:
                 probable_pps.append(None)
                 pp_gains.append(None)
-        
+
         # calculate pass prob
         pass_probs = np.ones(len(probable_scores))
         for speed in [-1, 0, 1]:
@@ -240,21 +314,21 @@ class PPRecommender:
         data['pp_gain_expect'] = data['pp_gain (breaking)'] * data['break_prob'] * data['pass_prob']
 
         data = pd.DataFrame(data,
-                                  columns=['name', 'star',
-                                           'true_score', 'true_pp',
-                                           'pred_score', 'break_prob',
-                                           # 'pred_score (breaking)', 'pred_pp (breaking)',
-                                           'pp_gain (breaking)', 'pass_prob', 'cs', 'set_id', 
-                                           'valid_count', 'true_speed',
-                                           'pp_gain_expect', 'pred_pp', 'true_score_id'])
+                            columns=['name', 'star',
+                                     'true_score', 'true_pp',
+                                     'pred_score', 'break_prob',
+                                     'pred_score (breaking)', 'pred_pp (breaking)',
+                                     'pp_gain (breaking)', 'pass_prob', 'cs', 'set_id',
+                                     'valid_count', 'true_speed',
+                                     'pp_gain_expect', 'pred_pp', 'true_score_id'])
         data.sort_values(by="pp_gain_expect", ascending=False, inplace=True)
         return data
 
-    def predict(self, uid, key_count=[4], beatmap_ids=[], max_star=None, max_size=300, min_star=0, 
+    def predict(self, uid, key_count=[4], beatmap_ids=[], max_star=None, max_size=300, min_star=0,
                 min_pp=None):
-        
+
         st = time.time()
-        user_bp = osu_utils.get_user_bp(self.connection, uid, self.config, None)
+        user_bp = self.pp_rule_set.user_bp(self.connection, uid, self.config)
         print(f"BP: {time.time() - st}")
         if len(user_bp.data) == 0:
             return None
@@ -267,6 +341,7 @@ class PPRecommender:
         data = self.rank(uid, data, user_bp)
         print(f"Rank time: {time.time() - st}")
         return data
+
 
 def save_excel(dfs, filename, idx_len):
     writer = pd.ExcelWriter(filename, engine='xlsxwriter')
@@ -285,19 +360,12 @@ def save_excel(dfs, filename, idx_len):
 
 
 if __name__ == "__main__":
-    # uid = "10702235"  # ca
-    # uid = "10500832"  # xz
-    # uid = "7304075"  # ku
-    # uid = "6701729" # serika
-    # uid = "10817494"  # nickname
-    # uid = "30281907"  # potassium
-    # uid = "8586018"  # luoxuan
+    import sys
 
-    import sys, json
     uid = sys.argv[-1]
 
     connection = repository.get_connection()
-    recommender = PPRecommender(NetworkConfig(), connection)
+    recommender = PPRecommender(NetworkConfig(), connection, rule=4)
     data = recommender.predict(uid)
     data_json = data.reset_index(inplace=False).to_json(orient='records', index=True)
 
@@ -307,7 +375,7 @@ if __name__ == "__main__":
     os.makedirs("report", exist_ok=True)
     save_excel({'Sort by PP gain expect': data,
                 'Sort by break prob': data.sort_values(by=['break_prob', 'pp_gain_expect'],
-                                                     ascending=False),
+                                                       ascending=False),
                 'Sort by current BP': data.sort_values(by=['true_pp'], ascending=False),
                 'Sort by pass prob': data.sort_values(by=['pass_prob', 'pp_gain_expect'])},
                os.path.join("report", f"{user_name[0]} - PP report.xlsx"), idx_len=2)
