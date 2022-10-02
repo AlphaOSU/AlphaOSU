@@ -85,7 +85,7 @@ class PPRecommender:
             raise
 
         for speed in [-1, 0, 1]:
-            path = get_pass_model_path(speed, result_path) + "_train"
+            path = get_pass_model_path(speed, result_path)
             if os.path.exists(path):
                 self.speed_to_pass_model[speed] = xgboost.Booster(model_file=path)
             else:

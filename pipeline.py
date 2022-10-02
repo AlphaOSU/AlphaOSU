@@ -53,7 +53,7 @@ if __name__ == "__main__":
     config = NetworkConfig()
 
     try:
-        shutil.rmtree(os.path.join("result", "log"), ignore_errors=True)
+        # shutil.rmtree(os.path.join("result", "log"), ignore_errors=True)
         register_log_output("data_fetch")
         data_fetcher.fetch()
 
@@ -70,8 +70,6 @@ if __name__ == "__main__":
         train_pass_xgboost.train(config)
 
         register_log_output("test")
-        connection = repository.get_connection()
-        recommender = PPRecommender(config, connection)
 
         # move db
         with repository.get_connection() as conn:
