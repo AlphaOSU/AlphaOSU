@@ -72,9 +72,8 @@ class PassDataIter(xgboost.core.DataIter):
         return 1
 
 def save(model, feature_names, speed, record=None):
-    model.save_model(get_pass_model_path(speed) + "_train")
+    model.save_model(get_pass_model_path(speed, is_training=True))
     old = model.feature_names
-    # model.dump_model(get_pass_model_path(speed) + "_dump.txt")
     model.feature_names = feature_names
     with open(os.path.join(get_pass_model_dir(speed), "importance.txt"), "w") as f:
         for k, v in sorted(model.get_fscore().items(), key=lambda x: x[1], reverse=True):

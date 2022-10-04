@@ -1,3 +1,4 @@
+from genericpath import isfile
 import data_fetcher
 import train_score_als_db
 import prepare_pass_data
@@ -5,7 +6,7 @@ import train_pass_xgboost
 from data.model import *
 import sys
 import shutil
-from recommender import PPRecommender
+import gzip
 
 
 class RedirectLogger:
@@ -53,7 +54,7 @@ if __name__ == "__main__":
     config = NetworkConfig()
 
     try:
-        # shutil.rmtree(os.path.join("result", "log"), ignore_errors=True)
+        shutil.rmtree(os.path.join("result", "log"), ignore_errors=True)
         register_log_output("data_fetch")
         data_fetcher.fetch()
 
@@ -69,9 +70,8 @@ if __name__ == "__main__":
         register_log_output("train_pass")
         train_pass_xgboost.train(config)
 
-        register_log_output("test")
-
-        # move db
+        # deploy
+        register_log_output("deploy")
         with repository.get_connection() as conn:
             print("Drop CannotPass")
             repository.execute_sql(conn, f"DROP TABLE IF EXISTS {CannotPass.TABLE_NAME}")
@@ -85,15 +85,28 @@ if __name__ == "__main__":
             print("VACCUM")
             conn.execute("VACUUM")
 
+            deploy_db_file = os.path.join("result", "data_deploy.db")
+            backup_db_file = os.path.join("result", "data_deploy_backup.tar.gz")
+            training_db_file = os.path.join("result", "data.db")
+
             print("Backup")
-            shutil.copyfile(os.path.join("result", "data_deploy.db"), os.path.join("result", "data_deploy_backup.db"))
+            if os.isfile(deploy_db_file):
+                with open(deploy_db_file, "rb") as fin, gzip.open(backup_db_file, "wb") as fout:
+                    shutil.copyfileobj(fin, fout)
             for speed in [-1, 0, 1]:
-                shutil.copyfile(get_pass_model_path(speed), get_pass_model_path(speed) + "_backup")
+                path = get_pass_model_path(speed)
+                if os.isfile(path):
+                    shutil.copyfile(path, get_pass_model_path(speed) + "_backup")
 
             print("Deploy")
-            shutil.copyfile(os.path.join("result", "data.db"), os.path.join("result", "data_deploy.db"))
+            # fast deploy by moving
+            shutil.move(training_db_file, deploy_db_file)
             for speed in [-1, 0, 1]:
-                shutil.copyfile(get_pass_model_path(speed) + "_train", get_pass_model_path(speed))
+                shutil.move(get_pass_model_path(speed, is_training=True), get_pass_model_path(speed))
+            
+            print("Copy back")
+            # copy back database for the next training
+            shutil.copyfile(os.path.join("result", "data_deploy.db"), os.path.join("result", "data.db"))
 
             try:
                 from post_process import finish

@@ -422,45 +422,11 @@ class NetworkConfig:
 
     def __init__(self, data_dict=None):
         if data_dict is None:
-            data_dict = {
-                "game_mode": "mania",
-                "embedding_size": 15,
-                "embedding_bias": True,
-                "epoch": 200,
-                "early_stop_patient": 5,
-                "dense_units": [256, 128, 64],
-                "dropout_rate": 0.0,
-                "batch_size": 2048,
-                "loss_type": "pp_mse",
-                "optimizier": "adam",
-                "lr": 1e-3,
-                "test_ratio": 0.98,
-                "l2": 0,
-                "pretrain_epoch": 100,
-                "save_results": True,
-                "pp_weight_clip": 10,
-                "max_recall": 500
-            }
-        self.embedding_size: int = data_dict['embedding_size']
+            data_dict = {}
+        self.game_mode = data_dict.get('game_mode', 'mania')
+        self.embedding_size: int = data_dict.get('embedding_size', 15)
         self.embedding_size_beyas = (self.embedding_size - 1) ** 2 + 1
-
-        self.embedding_bias = data_dict['embedding_bias']
-        self.game_mode = data_dict['game_mode']
-        self.dense_units = data_dict['dense_units']
-        self.dropout_rate = data_dict['dropout_rate']
-        self.batch_size = data_dict['batch_size']
-        self.loss_type = data_dict['loss_type']
-        self.optimizier = data_dict['optimizier']
-        self.lr = data_dict['lr']
-        self.epoch = data_dict['epoch']
-        self.test_ratio = data_dict['test_ratio']
-        self.l2 = data_dict['l2']
-        self.pretrain_epoch = data_dict['pretrain_epoch']
-        self.load_beyas = True
-        self.save_results = data_dict['save_results']
-        self.early_stop_patient = data_dict['early_stop_patient']
-        self.pp_weight_clip = data_dict['pp_weight_clip']
-        self.max_recall = data_dict['max_recall']
+        self.pp_weight_clip = data_dict.get('pp_weight_clip', 10)
 
     def get_embedding_names(self, name, is_sigma=False, is_alpha=False):
         if is_sigma:
@@ -544,8 +510,11 @@ class BestPerformance:
         new.pp_order_list = self.pp_order_list.copy()
         return new
 
-def get_pass_model_path(speed, result_path="result"):
-    return os.path.join(get_pass_model_dir(speed, result_path), f"model")
+def get_pass_model_path(speed, result_path="result", is_training=False):
+    path = os.path.join(get_pass_model_dir(speed, result_path), f"model")
+    if is_training:
+        path += "_train"
+    return path
 
 def get_pass_model_dir(speed, result_path="result"):
     dir_name = os.path.join(result_path, f"pass_xgboost_{speed}")
