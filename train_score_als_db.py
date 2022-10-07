@@ -284,9 +284,9 @@ def train_score_by_als(config: NetworkConfig):
     connection = repository.get_connection()
 
     with connection:
-        repository.execute_sql(connection, f"DROP TABLE IF EXISTS {BeatmapEmbedding.TABLE_NAME}")
-        repository.execute_sql(connection, f"DROP TABLE IF EXISTS {UserEmbedding.TABLE_NAME}")
-        repository.execute_sql(connection, f"DROP TABLE IF EXISTS {ModEmbedding.TABLE_NAME}")
+        # repository.execute_sql(connection, f"DROP TABLE IF EXISTS {BeatmapEmbedding.TABLE_NAME}")
+        # repository.execute_sql(connection, f"DROP TABLE IF EXISTS {UserEmbedding.TABLE_NAME}")
+        # repository.execute_sql(connection, f"DROP TABLE IF EXISTS {ModEmbedding.TABLE_NAME}")
         repository.create_index(connection, "score_user", Score.TABLE_NAME, [Score.USER_ID])
         repository.create_index(connection, "score_beatmap", Score.TABLE_NAME, [Score.BEATMAP_ID])
     previous_r2 = -10000
@@ -296,7 +296,7 @@ def train_score_by_als(config: NetworkConfig):
     weights.user_embedding.key_to_embed_id = weights.user_embedding.key_to_embed_id.to_dict()
     weights.mod_embedding.key_to_embed_id = weights.mod_embedding.key_to_embed_id.to_dict()
 
-    for epoch in range(config.epoch):
+    for epoch in range(200):
 
         # train beatmap
         statistics = TrainingStatistics("beatmap", len(weights.beatmap_embedding.key_to_embed_id))

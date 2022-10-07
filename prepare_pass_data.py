@@ -36,7 +36,6 @@ def get_not_passed_candidates(conn, config: NetworkConfig, uid, variant, weights
     user_bp = osu_utils.get_user_bp(conn, uid, config)
     if len(user_bp.data) < 100:
         return set()
-    min_score = min(map(lambda x: x[1], user_bp.data.values()))
     min_pp = user_bp.pp_order_list[0]
     user_bp_data = set(map(lambda x: (x[0], x[1][0]), user_bp.data.items()))
 
@@ -91,8 +90,8 @@ def get_not_passed_candidates(conn, config: NetworkConfig, uid, variant, weights
             not_pass_set.add(
                 (bid, speed, score, pp, bisect.bisect_left(user_bp.pp_order_list, pp), False))
 
-    if len(not_pass_set) >= 200:
-        not_pass_set = set(random.sample(list(not_pass_set), 200))
+    if len(not_pass_set) >= 300:
+        not_pass_set = set(sorted(not_pass_set, key=lambda x: x[3], reverse=True)[:300])
     for i, bid in enumerate(user_bp.id_of_pp_order_list):
         (speed, score, pp, star, score_id, cs) = user_bp.data[bid]
         not_pass_set.add((bid, speed, score, pp, i + 1, True))

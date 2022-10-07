@@ -78,11 +78,8 @@ def map_osu_score(score, real_to_train: bool, arctanh=np.arctanh, tanh=np.tanh):
     global k_score, b_score, scale
     if real_to_train:
         return arctanh(k_score * np.clip(score, min_score, max_score) + b_score)
-        # return sigmoid(k_score * score + b_score) * 2 - 1
-        # return k_score * score + b_score
     else:
         return np.minimum((tanh(score) - b_score) / k_score, max_score)
-        # return (score - b_score) / k_score
 
 
 def map_osu_acc(acc, real_to_train: bool, arctanh=np.arctanh, tanh=np.tanh):

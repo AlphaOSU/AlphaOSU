@@ -34,9 +34,8 @@ def load_embedding(table_name, primary_keys, embedding_name, config: NetworkConf
 
     project = list(primary_keys)
     project += config.get_embedding_names(embedding_name)
-    if config.load_beyas:
-        project.append(config.get_embedding_names(embedding_name, is_sigma=True))
-        project.append(config.get_embedding_names(embedding_name, is_alpha=True))
+    project.append(config.get_embedding_names(embedding_name, is_sigma=True))
+    project.append(config.get_embedding_names(embedding_name, is_alpha=True))
     with repository.get_connection() as conn:
         ensure_embedding_column(conn, table_name, embedding_name, config)
         cursor = repository.select(conn, table_name=table_name, project=project)
@@ -44,9 +43,8 @@ def load_embedding(table_name, primary_keys, embedding_name, config: NetworkConf
         primary_values = tpl[:len(primary_keys)]
         seed(tuple(primary_values))
         embedding = list(tpl[len(primary_keys):len(primary_keys) + embedding_size])
-        if config.load_beyas:
-            sigma = repository.db_to_np(tpl[-2])
-            alpha = tpl[-1]
+        sigma = repository.db_to_np(tpl[-2])
+        alpha = tpl[-1]
 
         for j in range(embedding_size):
             if embedding[j] is None:
@@ -54,22 +52,16 @@ def load_embedding(table_name, primary_keys, embedding_name, config: NetworkConf
                 break
         embedding = np.asarray(embedding)
         embeddings.append(embedding)
-        if config.load_beyas:
-            sigmas.append(sigma if (sigma is not None and sigma.shape == (embedding_size, embedding_size))
-                          else np.zeros((embedding_size, embedding_size), np.float64))
-            alphas.append(alpha if alpha is not None else 0.0)
+        sigmas.append(sigma if (sigma is not None and sigma.shape == (embedding_size, embedding_size))
+                        else np.zeros((embedding_size, embedding_size), np.float64))
+        alphas.append(alpha if alpha is not None else 0.0)
         key_to_embed_id["-".join(map(str, primary_values))] = i
-    if config.load_beyas:
-        return EmbeddingData(
-            key_to_embed_id=pd.Series(key_to_embed_id, name=table_name),
-            embeddings=[np.asarray(embeddings)],
-            sigma=np.asarray(sigmas, np.float64),
-            alpha=np.asarray(alphas, np.float64)
-        )
-    else:
-        return EmbeddingData(
-            key_to_embed_id=pd.Series(key_to_embed_id, name=table_name),
-            embeddings=[np.asarray(embeddings)])
+    return EmbeddingData(
+        key_to_embed_id=pd.Series(key_to_embed_id, name=table_name),
+        embeddings=[np.asarray(embeddings)],
+        sigma=np.asarray(sigmas, np.float64),
+        alpha=np.asarray(alphas, np.float64)
+    )
 
 
 def save_embedding(conn, embedding: EmbeddingData, config: NetworkConfig,

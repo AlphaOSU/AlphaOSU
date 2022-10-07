@@ -90,12 +90,12 @@ if __name__ == "__main__":
             training_db_file = os.path.join("result", "data.db")
 
             print("Backup")
-            if os.isfile(deploy_db_file):
+            if os.path.isfile(deploy_db_file):
                 with open(deploy_db_file, "rb") as fin, gzip.open(backup_db_file, "wb") as fout:
                     shutil.copyfileobj(fin, fout)
             for speed in [-1, 0, 1]:
                 path = get_pass_model_path(speed)
-                if os.isfile(path):
+                if os.path.isfile(path):
                     shutil.copyfile(path, get_pass_model_path(speed) + "_backup")
 
             print("Deploy")
