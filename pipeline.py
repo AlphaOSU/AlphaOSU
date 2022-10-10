@@ -1,12 +1,11 @@
-from genericpath import isfile
-import data_fetcher
-import train_score_als_db
-import prepare_pass_data
-import train_pass_xgboost
-from data.model import *
-import sys
-import shutil
 import gzip
+import shutil
+import sys
+
+import data_fetcher
+import train_pass_kernel
+import train_score_als_db
+from data.model import *
 
 
 class RedirectLogger:
@@ -63,18 +62,12 @@ if __name__ == "__main__":
         with repository.get_connection() as conn:
             train_score_als_db.update_score_count(conn)
 
-        register_log_output("prepare_not_passed_candidates")
-        prepare_pass_data.prepare_not_passed_candidates(config)
-        prepare_pass_data.shuffle_cannot_pass()
-
         register_log_output("train_pass")
-        train_pass_xgboost.train(config)
+        train_pass_kernel.construct_nearest_neighbor(config)
 
         # deploy
         register_log_output("deploy")
         with repository.get_connection() as conn:
-            print("Drop CannotPass")
-            repository.execute_sql(conn, f"DROP TABLE IF EXISTS {CannotPass.TABLE_NAME}")
 
             print("Index Beatmap")
             repository.execute_sql(conn, "DROP TABLE IF EXISTS BeatmapSearch")
@@ -93,16 +86,10 @@ if __name__ == "__main__":
             if os.path.isfile(deploy_db_file):
                 with open(deploy_db_file, "rb") as fin, gzip.open(backup_db_file, "wb") as fout:
                     shutil.copyfileobj(fin, fout)
-            for speed in [-1, 0, 1]:
-                path = get_pass_model_path(speed)
-                if os.path.isfile(path):
-                    shutil.copyfile(path, get_pass_model_path(speed) + "_backup")
 
             print("Deploy")
             # fast deploy by moving
             shutil.move(training_db_file, deploy_db_file)
-            for speed in [-1, 0, 1]:
-                shutil.move(get_pass_model_path(speed, is_training=True), get_pass_model_path(speed))
             
             print("Copy back")
             # copy back database for the next training

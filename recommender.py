@@ -1,11 +1,11 @@
-import osu_utils
-from data.model import *
-from pass_feature_feed import PassFeatureFeed
-import xgboost
-from scipy import stats, integrate
-import bisect
-
 from abc import abstractmethod, ABCMeta
+from collections import defaultdict
+
+from scipy import stats, integrate
+
+import osu_utils
+import train_pass_kernel
+from data.model import *
 
 
 class PPRuleSet(metaclass=ABCMeta):
@@ -73,7 +73,6 @@ class PPRecommender:
 
     def __init__(self, config: NetworkConfig, connection: sqlite3.Connection, result_path="result",
                  rule=3):
-        self.pass_feature_feed = PassFeatureFeed(config, connection)
         self.config = config
         self.connection = connection
         self.speed_to_pass_model = {}
@@ -83,14 +82,6 @@ class PPRecommender:
             self.pp_rule_set: PPRuleSet = ManiaPPV4()
         else:
             raise
-
-        for speed in [-1, 0, 1]:
-            path = get_pass_model_path(speed, result_path)
-            if os.path.exists(path):
-                self.speed_to_pass_model[speed] = xgboost.Booster(model_file=path)
-            else:
-                print("warning: pass model not found: speed =", speed)
-                self.speed_to_pass_model[speed] = None
 
     def similarity(self, uid, variant):
 
@@ -240,17 +231,14 @@ class PPRecommender:
         probable_scores, probable_pps, break_probs, \
         pp_gains, true_scores, true_pps, pass_probs, true_score_ids = [], [], [], [], [], [], [], []
         true_speeds = []
-        pass_feature_list = {-1: [], 0: [], 1: []}
-        pass_feature_list_index = {-1: [], 0: [], 1: []}
+        pass_feature_list = defaultdict(lambda : [])
+        pass_feature_list_index = defaultdict(lambda : [])
 
         # estimate pp incre
         for i, row in enumerate(data.itertuples(name=None)):
             (bid, mod), star, pred_score, _, _, od, count, speed, variant, _, _, _ = row
-            # pass rate feature. TODO: too slow!! 200ms
-            pass_features, _ = self.pass_feature_feed.get_pass_features(uid, variant, bid, mod,
-                                                                        is_predicting=True)
-            pass_feature_list[speed].append(pass_features)
-            pass_feature_list_index[speed].append(i)
+            pass_feature_list[f"{speed}/{variant}"].append(bid)
+            pass_feature_list_index[f"{speed}/{variant}"].append(i)
             # break prob
             true_speed, true_score, true_pp, true_star, true_score_id = user_bp.get_score_pp(bid)
             if true_score is not None:
@@ -296,11 +284,10 @@ class PPRecommender:
 
         # calculate pass prob
         pass_probs = np.ones(len(probable_scores))
-        for speed in [-1, 0, 1]:
-            if len(pass_feature_list[speed]) != 0 and speed in self.speed_to_pass_model:
-                dmatrix = xgboost.DMatrix(np.asarray(pass_feature_list[speed]))
-                probs = self.speed_to_pass_model[speed].predict(dmatrix)
-                pass_probs[pass_feature_list_index[speed]] = probs
+        for key in pass_feature_list:
+            speed, variant = key.split("/")
+            probs = train_pass_kernel.estimate_pass_probability(uid, variant, pass_feature_list[key], speed, self.config)
+            pass_probs[pass_feature_list_index[key]] = probs
 
         data['pred_score (breaking)'] = probable_scores
         data['pred_pp (breaking)'] = probable_pps
