@@ -286,7 +286,7 @@ class PPRecommender:
         pass_probs = np.ones(len(probable_scores))
         for key in pass_feature_list:
             speed, variant = key.split("/")
-            probs = train_pass_kernel.estimate_pass_probability(uid, variant, pass_feature_list[key], speed, self.config)
+            probs = train_pass_kernel.estimate_pass_probability(uid, variant, pass_feature_list[key], speed, self.config, self.connection)
             pass_probs[pass_feature_list_index[key]] = probs
 
         data['pred_score (breaking)'] = probable_scores
