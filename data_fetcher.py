@@ -292,7 +292,7 @@ def apply_speed_on_beatmap(game_mode):
     ])
     score_cursor = repository.select(connection, Score.TABLE_NAME,
                                      project=[Score.BEATMAP_ID, Score.SPEED,
-                                              f"MAX({Score.SCORE})", Score.PP],
+                                              f"MAX({Score.CUSTOM_ACCURACY})", Score.PP],
                                      where={Score.SPEED: 0, Score.PP: 0}, where_format="%s != ?",
                                      group_by=[Score.BEATMAP_ID, Score.SPEED])
     score_cursor = list(score_cursor)
@@ -301,7 +301,7 @@ def apply_speed_on_beatmap(game_mode):
     wheres_ht = []
     puts_dt = []
     wheres_dt = []
-    for beatmap_id, speed, score, pp in score_cursor:
+    for beatmap_id, speed, custom_acc, pp in score_cursor:
         beatmap_cursor = repository.select(connection, Beatmap.TABLE_NAME,
                                            project=[Beatmap.COUNT_SLIDERS, Beatmap.COUNT_CIRCLES,
                                                     Beatmap.OD],
@@ -311,11 +311,9 @@ def apply_speed_on_beatmap(game_mode):
         values = beatmap_cursor.fetchone()
         if values is None:
             continue
-        if speed == -1:  # HT
-            score = score * 2
         objects = values[0] + values[1]
         od = values[2]
-        star = osu_utils.estimate_star_from_score(pp, score, objects, od)
+        star = osu_utils.estimate_star_from_acc(pp, custom_acc, objects)
         if speed == -1:
             puts_ht.append({
                 Beatmap.HT_STAR: star
@@ -386,8 +384,8 @@ def fetch():
         fetch_best_performance(game_mode='mania')
         fetch_beatmap_top_scores(game_mode='mania', variant='4k')
         fetch_beatmap_top_scores(game_mode='mania', variant='7k')
-        apply_speed_on_beatmap("mania")
         post_process_db()
+        apply_speed_on_beatmap("mania")
     except Exception as e:
         print("ERROR: " + str(api.recent_request))
         raise e
