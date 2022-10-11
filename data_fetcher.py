@@ -6,35 +6,35 @@ import random
 import datetime
 
 
-def get_state(key, default):
-    with repository.get_connection() as conn_progress:
-        count = repository.count(conn_progress, Task.TABLE_NAME, where={Task.TASK_NAME: key})
-        if count == 0:
-            return default
-        progress, t = repository.select_first(conn_progress, Task.TABLE_NAME,
-                                              project=[Task.TASK_STATE, Task.TASK_TIME],
-                                              where={Task.TASK_NAME: key})
-        if t + 2 * 24 * 3600 >= time.time():
-            return progress
-        return default
+# def get_state(key, default):  # Resume from a breakpoint
+#     with repository.get_connection() as conn_progress:
+#         count = repository.count(conn_progress, Task.TABLE_NAME, where={Task.TASK_NAME: key})
+#         if count == 0:
+#             return default
+#         progress, t = repository.select_first(conn_progress, Task.TABLE_NAME,
+#                                               project=[Task.TASK_STATE, Task.TASK_TIME],
+#                                               where={Task.TASK_NAME: key})
+#         if t + 2 * 24 * 3600 >= time.time():
+#             return progress
+#         return default
 
 
-def update_progress(connection: sqlite3.Connection, key, progress):
-    repository.insert_or_replace(connection, Task.TABLE_NAME, [{
-        Task.TASK_NAME: key,
-        Task.TASK_STATE: progress,
-        Task.TASK_TIME: time.time()
-    }])
+# def update_progress(connection: sqlite3.Connection, key, progress):  # save the progress now
+#     repository.insert_or_replace(connection, Task.TABLE_NAME, [{
+#         Task.TASK_NAME: key,
+#         Task.TASK_STATE: progress,
+#         Task.TASK_TIME: time.time()
+#     }])
 
 
-class ProgressControl:
+class ProgressControl:  #
     def __init__(self, key, total):
         self._key = key
         self._st = None
         self._st_count = 0
         # self._bar = tqdm.tqdm(desc=key)
 
-    def get_state(self, default):
+    def get_state(self, default):  # Resume from a breakpoint: get state
         with repository.get_connection() as conn_progress:
             count = repository.count(conn_progress, Task.TABLE_NAME,
                                      where={Task.TASK_NAME: self._key})
@@ -47,7 +47,8 @@ class ProgressControl:
             return progress
         return default
 
-    def commit(self, state: str, current_progress: int, total: int, connection: sqlite3.Connection):
+    def commit(self, state: str, current_progress: int, total: int,
+               connection: sqlite3.Connection):  # Resume from a breakpoint: save state
         if self._st is None:
             self._st = time.time()
             self._s_progress = current_progress
@@ -68,7 +69,7 @@ class ProgressControl:
         print(line)
 
 
-def fetch_user_ranking(game_mode, variant, max_page=10000, country=None):
+def fetch_user_ranking(game_mode, variant, max_page=10000, country=None):  # fetch user data with ranking
     total_count = 10000
     progress_control = ProgressControl(
         "fetch_user_ranking_%s_%s_%s" % (game_mode, variant, country),
@@ -126,7 +127,7 @@ def fetch_user_ranking(game_mode, variant, max_page=10000, country=None):
     # conn_ranking.close()
 
 
-def fetch_best_performance(game_mode, max_user=100000):
+def fetch_best_performance(game_mode, max_user=100000):  # fetch the best performance of users
     conn = repository.get_connection()
     with conn:
         user_id_name = list(repository.select(
@@ -181,6 +182,7 @@ def fetch_best_performance(game_mode, max_user=100000):
 
 
 def fetch_ranked_beatmaps(mode_int, max_maps=100000):
+    # fetch the information of all beatmaps, mode_int = 0:osu, 1:taiko, 2:catch, 3:mania
     progress_control = ProgressControl("fetch_ranked_beatmaps_%d_auth_2" % (mode_int), max_maps)
     state = json.loads(progress_control.get_state(json.dumps({
         'cur_count': 0,
@@ -217,6 +219,7 @@ def fetch_ranked_beatmaps(mode_int, max_maps=100000):
 
 
 def fetch_beatmap_top_scores(game_mode, variant, max_beatmap=100000):
+    # fetch the top scores from the leaderboard of a beatmap
     connection = repository.get_connection()
     with connection:
         where = {
@@ -271,7 +274,7 @@ def fetch_beatmap_top_scores(game_mode, variant, max_beatmap=100000):
                 # break
 
 
-def insert_scores(conn, score_db_data):
+def insert_scores(conn, score_db_data):  # save the scores to the database
     data = []
     for score_dict in score_db_data:
         previous_score = repository.select(conn, Score.TABLE_NAME, project=[Score.SCORE], where={
@@ -284,7 +287,7 @@ def insert_scores(conn, score_db_data):
     repository.insert_or_replace(conn, Score.TABLE_NAME, data, or_ignore=False)
 
 
-def apply_speed_on_beatmap(game_mode):
+def apply_speed_on_beatmap(game_mode):  # calculate the star rating of HT and DT mode in mania
     connection = repository.get_connection()
     repository.ensure_column(connection, Beatmap.TABLE_NAME, [
         (Beatmap.HT_STAR, "REAL", "-1.0"),
@@ -378,6 +381,7 @@ def fetch():
     Task.create(conn_)
 
     try:
+        # mania
         for variant in ['4k', '7k']:
             for country in [None, "CN", "US"]:
                 fetch_user_ranking(game_mode='mania', variant=variant, country=country)
@@ -387,10 +391,21 @@ def fetch():
         fetch_beatmap_top_scores(game_mode='mania', variant='4k')
         fetch_beatmap_top_scores(game_mode='mania', variant='7k')
         apply_speed_on_beatmap("mania")
+        # std (in progress)
+        # for variant in ['4k', '7k']:
+        #     for country in [None, "CN", "US"]:
+        #         fetch_user_ranking(game_mode='mania', variant=variant, country=country)
+        #
+        # fetch_ranked_beatmaps(3)
+        # fetch_best_performance(game_mode='mania')
+        # fetch_beatmap_top_scores(game_mode='mania', variant='4k')
+        # fetch_beatmap_top_scores(game_mode='mania', variant='7k')
+        # apply_speed_on_beatmap("mania")
         post_process_db()
     except Exception as e:
         print("ERROR: " + str(api.recent_request))
         raise e
+
 
 if __name__ == "__main__":
     fetch()
