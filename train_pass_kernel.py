@@ -48,8 +48,7 @@ def construct_nearest_neighbor(config: NetworkConfig):
         repository.update(connection, UserEmbedding.TABLE_NAME, puts, wheres)
 
 
-def estimate_pass_probability(uid, variant, beatmap_ids, speed, config: NetworkConfig):
-    connection = repository.get_connection()
+def estimate_pass_probability(uid, variant, beatmap_ids, speed, config: NetworkConfig, connection):
     cur_nbrs_ids, cur_nbrs_distance = repository.select(connection, UserEmbedding.TABLE_NAME,
                                                         [UserEmbedding.NEIGHBOR_ID, UserEmbedding.NEIGHBOR_DISTANCE],
                                                         where={
@@ -65,8 +64,8 @@ def estimate_pass_probability(uid, variant, beatmap_ids, speed, config: NetworkC
     beatmap_id_to_score_index = dict([(b, i) for (i, b) in enumerate(beatmap_ids)])
     user_id_to_weight = dict(zip(cur_nbrs_ids, cur_nbrs_weights))
 
-    with repository.get_connection() as conn:
-        cursor = conn.execute(f"SELECT {Score.BEATMAP_ID}, {Score.USER_ID} "
+    with connection:
+        cursor = connection.execute(f"SELECT {Score.BEATMAP_ID}, {Score.USER_ID} "
                               "FROM Score "
                               f"WHERE Score.user_id IN ({','.join(map(str, cur_nbrs_ids))}) "
                               f"AND Score.{Score.GAME_MODE} == ? "
@@ -89,7 +88,7 @@ def estimate_pass_probability(uid, variant, beatmap_ids, speed, config: NetworkC
 
 
 if __name__ == "__main__":
-    construct_nearest_neighbor(NetworkConfig(), repository.get_connection())
+    construct_nearest_neighbor(NetworkConfig())
     print(estimate_pass_probability(7304075, '4k', [
         767046,  # triumph
         3525702,  # eternel
