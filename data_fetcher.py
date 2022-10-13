@@ -274,12 +274,13 @@ def fetch_beatmap_top_scores(game_mode, variant, max_beatmap=100000):
 def insert_scores(conn, score_db_data):
     data = []
     for score_dict in score_db_data:
-        previous_score = repository.select(conn, Score.TABLE_NAME, project=[Score.SCORE], where={
+        previous_pp = repository.select(conn, Score.TABLE_NAME, project=[Score.PP], where={
             Score.BEATMAP_ID: score_dict[Score.BEATMAP_ID],
             Score.USER_ID: score_dict[Score.USER_ID],
             Score.SPEED: score_dict[Score.SPEED],
         }).fetchone()
-        if previous_score is None or previous_score[0] < score_dict[Score.SCORE]:
+        # We only insert the scores with the highest pp.
+        if previous_pp is None or previous_pp[0] < score_dict[Score.PP]:
             data.append(score_dict)
     repository.insert_or_replace(conn, Score.TABLE_NAME, data, or_ignore=False)
 
