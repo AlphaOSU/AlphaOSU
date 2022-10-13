@@ -4,6 +4,8 @@ from data.model import *
 
 def estimate_star_from_acc(pp, custom_acc, objects):
     acc_pp = max(5 * custom_acc - 4, 0)
+    if acc_pp == 0:
+        return 0
     length_pp = 1 + 0.1 * min(1.0, objects / 1500)
     diff_pp = pp / acc_pp / length_pp / 8.0
     star = diff_pp ** (1 / 2.2) + 0.15
