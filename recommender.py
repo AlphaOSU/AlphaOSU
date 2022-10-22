@@ -24,6 +24,9 @@ class PPRuleSet(metaclass=ABCMeta):
     @abstractmethod
     def user_bp(self, connection, uid, config): pass
 
+    @abstractmethod
+    def db_column(self): pass
+
     def map_mod(self, mod):
         return mod
 
@@ -47,6 +50,9 @@ class ManiaPPV3(PPRuleSet):
     def user_bp(self, connection, uid, config):
         return osu_utils.get_user_bp(connection, uid, config, is_acc=False)
 
+    def db_column(self):
+        return Score.SCORE
+
 
 class ManiaPPV4(PPRuleSet):
 
@@ -67,6 +73,9 @@ class ManiaPPV4(PPRuleSet):
 
     def map_mod(self, mod):
         return mod + "-ACC"
+
+    def db_column(self):
+        return Score.CUSTOM_ACCURACY
 
 
 class PPRecommender:
@@ -231,8 +240,8 @@ class PPRecommender:
         probable_scores, probable_pps, break_probs, \
         pp_gains, true_scores, true_pps, pass_probs, true_score_ids = [], [], [], [], [], [], [], []
         true_speeds = []
-        pass_feature_list = defaultdict(lambda : [])
-        pass_feature_list_index = defaultdict(lambda : [])
+        pass_feature_list = defaultdict(lambda: [])
+        pass_feature_list_index = defaultdict(lambda: [])
 
         # estimate pp incre
         for i, row in enumerate(data.itertuples(name=None)):
@@ -286,7 +295,9 @@ class PPRecommender:
         pass_probs = np.ones(len(probable_scores))
         for key in pass_feature_list:
             speed, variant = key.split("/")
-            probs = train_pass_kernel.estimate_pass_probability(uid, variant, pass_feature_list[key], speed, self.config, self.connection)
+            probs = train_pass_kernel.estimate_pass_probability(uid, variant,
+                                                                pass_feature_list[key], speed,
+                                                                self.config, self.connection)
             pass_probs[pass_feature_list_index[key]] = probs
 
         data['pred_score (breaking)'] = probable_scores
@@ -329,6 +340,36 @@ class PPRecommender:
         print(f"Rank time: {time.time() - st}")
         return data
 
+    def draw_prediction_distribution_diagram(self, user_id, variant, beatmap_id, mod):
+        score_train, score_std_train = osu_utils.predict_score_std(self.connection, user_id,
+                                                                   variant, self.config,
+                                                                   beatmap_id,
+                                                                   self.pp_rule_set.map_mod(mod))
+        if mod == "DT":
+            speed = 1
+        elif mod == 'HT':
+            speed = -1
+        else:
+            speed = 0
+        true_score = repository.select_first(self.connection, table_name=Score.TABLE_NAME,
+                                             project=[self.pp_rule_set.db_column()],
+                                             where={
+                                                 Score.USER_ID: user_id,
+                                                 Score.BEATMAP_ID: beatmap_id,
+                                                 Score.SPEED: speed
+                                             })
+        max_score_train = score_train + score_std_train * 3
+        min_score_train = score_train - score_std_train * 3
+        max_score = self.pp_rule_set.train_to_real(max_score_train)
+        min_score = self.pp_rule_set.train_to_real(min_score_train)
+        x = np.linspace(min_score, max_score, num=100)
+        x_train = self.pp_rule_set.real_to_train(x)
+        probs = np.exp(-(x_train - score_train) ** 2 / (2 * score_std_train ** 2))
+        probs = [round(x, ndigits=4) for x in probs.tolist()]
+
+        return min_score, max_score, probs, true_score[0] if true_score is not None else None
+
+
 
 def save_excel(dfs, filename, idx_len):
     writer = pd.ExcelWriter(filename, engine='xlsxwriter')
@@ -348,6 +389,7 @@ def save_excel(dfs, filename, idx_len):
 
 if __name__ == "__main__":
     import sys
+    import matplotlib.pyplot as plt
 
     uid = sys.argv[-1]
 
@@ -355,6 +397,30 @@ if __name__ == "__main__":
     recommender = PPRecommender(NetworkConfig(), connection, rule=4)
     data = recommender.predict(uid)
     data_json = data.reset_index(inplace=False).to_json(orient='records', index=True)
+
+    for i in range(10):
+        x = data.iloc[i]
+        bid, mod = x.name
+
+        min_score, max_score, probs, true_score = recommender.draw_prediction_distribution_diagram(uid, '4k', str(bid), mod)
+        x = np.linspace(min_score, max_score, num=len(probs))
+
+        true_score_index = 0
+        if true_score is not None:
+            true_score_index = int((true_score - min_score) / (max_score - min_score) * len(x))
+            if true_score_index >= len(x):
+                true_score_index = len(x) - 1
+
+        plt.clf()
+        plt.ylim([0, 1.05])
+        plt.fill_between(x[true_score_index:], probs[true_score_index:], color='b', alpha=0.3)
+        if true_score is not None:
+            plt.text(x[true_score_index], probs[true_score_index] - 0.05,
+                     ' ← Current', fontsize=10, color='black')
+        ax = plt.gca()
+        ax.get_yaxis().set_visible(False)
+        plt.plot(x, probs)
+        plt.savefig(f"{bid}.png")
 
     user_name = repository.select_first(connection, User.TABLE_NAME, project=[User.NAME],
                                         where={User.ID: uid})
