@@ -125,6 +125,34 @@ def fetch_user_ranking(game_mode, variant, max_page=10000, country=None):
                                     conn_ranking)
     # conn_ranking.close()
 
+def fetch_best_performance_for_user(game_mode, user_id, connection):
+    data = api.request_auth_api("users/%d/scores/best" % user_id, "GET", {
+        "mode": game_mode,
+        "limit": 100
+    })
+    if 'error' in data:
+        print("ERROR: " + api.recent_request)
+        # user does not exist, skip!!
+        return None
+
+    def filter_beatmap(x):
+        beatmap = x['beatmap']
+        if beatmap['convert']:
+            return False
+        return True
+
+    data = list(filter(filter_beatmap, data))
+
+    beatmap_db_data = list(
+        filter(lambda x: x is not None,
+               map(lambda x: parse_beatmap_data(x['beatmap'], x['beatmapset'], connection),
+                   data)
+               )
+    )
+    score_db_data = list(map(lambda x: parse_score_data(x, x['beatmap']['id'], False), data))
+
+    return beatmap_db_data, score_db_data
+
 
 def fetch_best_performance(game_mode, max_user=100000):
     conn = repository.get_connection()
@@ -142,30 +170,7 @@ def fetch_best_performance(game_mode, max_user=100000):
         print(user_id, user_name, pp)
         if i <= previous_state:
             continue
-        data = api.request_auth_api("users/%d/scores/best" % user_id, "GET", {
-            "mode": game_mode,
-            "limit": 100
-        })
-        if 'error' in data:
-            print("ERROR: " + api.recent_request)
-            # user does not exist, skip!!
-            continue
-
-        def filter_beatmap(x):
-            beatmap = x['beatmap']
-            if beatmap['convert']:
-                return False
-            return True
-
-        data = list(filter(filter_beatmap, data))
-
-        beatmap_db_data = list(
-            filter(lambda x: x is not None,
-                   map(lambda x: parse_beatmap_data(x['beatmap'], x['beatmapset'], conn),
-                       data)
-                   )
-        )
-        score_db_data = list(map(lambda x: parse_score_data(x, x['beatmap']['id'], False), data))
+        beatmap_db_data, score_db_data = fetch_best_performance_for_user(game_mode, user_id, conn)
 
         with conn:
             repository.insert_or_replace(conn, Beatmap.TABLE_NAME, beatmap_db_data)
