@@ -278,6 +278,52 @@ def train_embedding(key, get_data_method, weights, config, connection, epoch,
                             f"r2_adj:{mean(training_statistics.r2_adj_list):.4f} "
                             f"mse:{mean(training_statistics.mse_list):.4f}")
 
+def train_personal_embedding(key, get_data_method, weights, config, connection,
+                             epoch, embedding_data: EmbeddingData,
+                             other_embedding_data: EmbeddingData,
+                             other_embedding_data2: EmbeddingData,
+                             cachable=True):
+    global cache
+    if key in cache:
+        data = cache[key]
+    else:
+        data = get_data_method(key, weights, config, connection, epoch)
+        if cachable:
+            cache[key] = data
+    if data is None:
+        return None
+
+    scores, other_emb_id, other_emb_id2, regression_weights = data
+    other_embs = other_embedding_data.embeddings[0][other_emb_id]
+    other_embs2 = other_embedding_data2.embeddings[0][other_emb_id2]
+    x = other_embs * other_embs2
+
+    (emb, sigma, alpha, metrics) = linear_square(scores, x, regression_weights, epoch, config)
+
+    emb_id = embedding_data.key_to_embed_id[key]
+    embedding_data.embeddings[0][emb_id] = emb
+    embedding_data.sigma[emb_id] = sigma
+    embedding_data.alpha[emb_id] = alpha
+
+
+def train_personal_embedding_online(config: NetworkConfig, key):
+    connection = repository.get_connection()
+
+    weights = data_process.load_weight_online(config)
+    weights.beatmap_embedding.key_to_embed_id = weights.beatmap_embedding.key_to_embed_id.to_dict()
+    weights.user_embedding.key_to_embed_id = weights.user_embedding.key_to_embed_id.to_dict()
+    weights.mod_embedding.key_to_embed_id = weights.mod_embedding.key_to_embed_id.to_dict()
+
+    user_key = key #list(weights.user_embedding.key_to_embed_id.keys())[1]
+    train_personal_embedding(user_key, get_user_train_data, weights, config, connection, 200,
+                             weights.user_embedding, weights.beatmap_embedding,
+                             weights.mod_embedding)
+
+    data_process.save_embedding(connection, weights.user_embedding, config,
+                                UserEmbedding.TABLE_NAME,
+                                UserEmbedding.EMBEDDING)
+    connection.commit()
+
 
 def train_score_by_als(config: NetworkConfig):
     connection = repository.get_connection()

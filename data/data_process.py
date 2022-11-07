@@ -209,5 +209,17 @@ def load_weight(config: NetworkConfig):
     # )
     return weights
 
+def load_weight_online(config: NetworkConfig):
+    weights = ScoreModelWeight()
+    weights.user_embedding = load_embedding(UserEmbedding.TABLE_NAME, UserEmbedding.PRIMARY_KEYS,
+                                            UserEmbedding.EMBEDDING, config)
+    weights.beatmap_embedding = load_embedding(BeatmapEmbedding.TABLE_NAME,
+                                               BeatmapEmbedding.PRIMARY_KEYS,
+                                               BeatmapEmbedding.ITEM_EMBEDDING,
+                                               config)
+    weights.mod_embedding = load_embedding(ModEmbedding.TABLE_NAME,
+                                           ModEmbedding.PRIMARY_KEYS,
+                                           ModEmbedding.EMBEDDING, config)
+    return weights
 
 
