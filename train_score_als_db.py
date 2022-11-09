@@ -112,7 +112,6 @@ def get_beatmap_train_data(beatmap_key, weights: ScoreModelWeight,
     for x in repository.execute_sql(connection, sql):
         score = x[3] * 2 if x[2] == -1 else x[3]
         if score < osu_utils.min_score:
-            print(f"{score}")
             continue
         acc = x[-1]
         if acc < osu_utils.min_acc:

@@ -29,7 +29,7 @@ python pipeline.py
 
 - fetch data: `data_fetcher.py`
 - train the score model: `train_score_als_db.py`
-- train the pass model: `train_pass_xgboost.py`
+- train the pass model: `train_pass_kernel.py`
 - inference: `recommender.py`
 
 

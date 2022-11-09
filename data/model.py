@@ -54,6 +54,9 @@ class UserEmbedding:
     EMBEDDING = "embedding"
     EMBEDDING_BAYESIAN = "embedding_beyasian"
 
+    NEIGHBOR_ID = "neighbor_id"
+    NEIGHBOR_DISTANCE = "neighbor_distance"
+
     @staticmethod
     def create(conn: sqlite3.Connection):
         repository.create_table(conn, table_name=UserEmbedding.TABLE_NAME, columns={
@@ -427,6 +430,9 @@ class NetworkConfig:
         self.embedding_size: int = data_dict.get('embedding_size', 15)
         self.embedding_size_beyas = (self.embedding_size - 1) ** 2 + 1
         self.pp_weight_clip = data_dict.get('pp_weight_clip', 10)
+        self.pass_band_width = data_dict.get('pass_band_width', 1)
+        self.pass_basic_weight_played = data_dict.get('pass_basic_weight_played', 0.7)
+        self.pass_power = data_dict.get('pass_basic_weight_neighbor_played', 0.8)
 
     def get_embedding_names(self, name, is_sigma=False, is_alpha=False):
         if is_sigma:

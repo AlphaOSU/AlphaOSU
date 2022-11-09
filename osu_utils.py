@@ -2,6 +2,14 @@ from sklearn.linear_model import LinearRegression
 
 from data.model import *
 
+def estimate_star_from_acc(pp, custom_acc, objects):
+    acc_pp = max(5 * custom_acc - 4, 0)
+    if acc_pp == 0:
+        return 0
+    length_pp = 1 + 0.1 * min(1.0, objects / 1500)
+    diff_pp = pp / acc_pp / length_pp / 8.0
+    star = diff_pp ** (1 / 2.2) + 0.15
+    return star
 
 def estimate_star_from_score(pp, score, objects, od):
     l = 1 + 0.1 * min(1500, objects) / 1500
@@ -230,13 +238,13 @@ if __name__ == "__main__":
     # print(mania_pp(816323, 9, 8.289408218280933, 257 + 1671))
     # print(estimate_star_from_score(603.614, 816323, 257 + 1671, 9))
 
-    print(mania_pp(1_000_000, 8.0, 5.0, 10000))
-    print(mania_pp(500_000, 8.0, 5.0, 10000))
-    print(mania_pp(960_000, 8.0, 5.0, 10000))
-
-    print(mania_pp_v4(1, 5.0, 10000))
-    print(mania_pp_v4(0.9, 5.0, 10000))
-    print(mania_pp_v4(0.8, 5.0, 10000))
+    # print(mania_pp(1_000_000, 8.0, 5.0, 10000))
+    # print(mania_pp(500_000, 8.0, 5.0, 10000))
+    # print(mania_pp(960_000, 8.0, 5.0, 10000))
+    #
+    # print(mania_pp_v4(1, 5.0, 10000))
+    # print(mania_pp_v4(0.9, 5.0, 10000))
+    # print(mania_pp_v4(0.8, 5.0, 10000))
     # print(map_osu_score(850000, real_to_train=True))
     # print(map_osu_score(960000, real_to_train=True))
     # print(map_osu_score(990000, real_to_train=True))
@@ -244,3 +252,5 @@ if __name__ == "__main__":
     # print(map_osu_score(1000000, real_to_train=True))
     #
     # print(map_osu_score(1, real_to_train=False))
+
+    print(estimate_star_from_acc(505.91, 0.945932922127987, 10000))

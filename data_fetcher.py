@@ -27,7 +27,7 @@ import datetime
 #     }])
 
 
-class ProgressControl:  #
+class ProgressControl:
     def __init__(self, key, total):
         self._key = key
         self._st = None
@@ -126,6 +126,34 @@ def fetch_user_ranking(game_mode, variant, max_page=10000, country=None):  # fet
                                     conn_ranking)
     # conn_ranking.close()
 
+def fetch_best_performance_for_user(game_mode, user_id, connection):
+    data = api.request_auth_api("users/%d/scores/best" % user_id, "GET", {
+        "mode": game_mode,
+        "limit": 100
+    })
+    if 'error' in data:
+        print("ERROR: " + api.recent_request)
+        # user does not exist, skip!!
+        return None
+
+    def filter_beatmap(x):
+        beatmap = x['beatmap']
+        if beatmap['convert']:
+            return False
+        return True
+
+    data = list(filter(filter_beatmap, data))
+
+    beatmap_db_data = list(
+        filter(lambda x: x is not None,
+               map(lambda x: parse_beatmap_data(x['beatmap'], x['beatmapset'], connection),
+                   data)
+               )
+    )
+    score_db_data = list(map(lambda x: parse_score_data(x, x['beatmap']['id'], False), data))
+
+    return beatmap_db_data, score_db_data
+
 
 def fetch_best_performance(game_mode, max_user=100000):  # fetch the best performance of users
     conn = repository.get_connection()
@@ -143,30 +171,7 @@ def fetch_best_performance(game_mode, max_user=100000):  # fetch the best perfor
         print(user_id, user_name, pp)
         if i <= previous_state:
             continue
-        data = api.request_auth_api("users/%d/scores/best" % user_id, "GET", {
-            "mode": game_mode,
-            "limit": 100
-        })
-        if 'error' in data:
-            print("ERROR: " + api.recent_request)
-            # user does not exist, skip!!
-            continue
-
-        def filter_beatmap(x):
-            beatmap = x['beatmap']
-            if beatmap['convert']:
-                return False
-            return True
-
-        data = list(filter(filter_beatmap, data))
-
-        beatmap_db_data = list(
-            filter(lambda x: x is not None,
-                   map(lambda x: parse_beatmap_data(x['beatmap'], x['beatmapset'], conn),
-                       data)
-                   )
-        )
-        score_db_data = list(map(lambda x: parse_score_data(x, x['beatmap']['id'], False), data))
+        beatmap_db_data, score_db_data = fetch_best_performance_for_user(game_mode, user_id, conn)
 
         with conn:
             repository.insert_or_replace(conn, Beatmap.TABLE_NAME, beatmap_db_data)
@@ -277,12 +282,13 @@ def fetch_beatmap_top_scores(game_mode, variant, max_beatmap=100000):
 def insert_scores(conn, score_db_data):  # save the scores to the database
     data = []
     for score_dict in score_db_data:
-        previous_score = repository.select(conn, Score.TABLE_NAME, project=[Score.SCORE], where={
+        previous_pp = repository.select(conn, Score.TABLE_NAME, project=[Score.PP], where={
             Score.BEATMAP_ID: score_dict[Score.BEATMAP_ID],
             Score.USER_ID: score_dict[Score.USER_ID],
             Score.SPEED: score_dict[Score.SPEED],
         }).fetchone()
-        if previous_score is None or previous_score[0] < score_dict[Score.SCORE]:
+        # We only insert the scores with the highest pp.
+        if previous_pp is None or previous_pp[0] < score_dict[Score.PP]:
             data.append(score_dict)
     repository.insert_or_replace(conn, Score.TABLE_NAME, data, or_ignore=False)
 
@@ -295,7 +301,7 @@ def apply_speed_on_beatmap(game_mode):  # calculate the star rating of HT and DT
     ])
     score_cursor = repository.select(connection, Score.TABLE_NAME,
                                      project=[Score.BEATMAP_ID, Score.SPEED,
-                                              f"MAX({Score.SCORE})", Score.PP],
+                                              f"MAX({Score.CUSTOM_ACCURACY})", Score.PP],
                                      where={Score.SPEED: 0, Score.PP: 0}, where_format="%s != ?",
                                      group_by=[Score.BEATMAP_ID, Score.SPEED])
     score_cursor = list(score_cursor)
@@ -304,7 +310,7 @@ def apply_speed_on_beatmap(game_mode):  # calculate the star rating of HT and DT
     wheres_ht = []
     puts_dt = []
     wheres_dt = []
-    for beatmap_id, speed, score, pp in score_cursor:
+    for beatmap_id, speed, custom_acc, pp in score_cursor:
         beatmap_cursor = repository.select(connection, Beatmap.TABLE_NAME,
                                            project=[Beatmap.COUNT_SLIDERS, Beatmap.COUNT_CIRCLES,
                                                     Beatmap.OD],
@@ -314,11 +320,9 @@ def apply_speed_on_beatmap(game_mode):  # calculate the star rating of HT and DT
         values = beatmap_cursor.fetchone()
         if values is None:
             continue
-        if speed == -1:  # HT
-            score = score * 2
         objects = values[0] + values[1]
         od = values[2]
-        star = osu_utils.estimate_star_from_score(pp, score, objects, od)
+        star = osu_utils.estimate_star_from_acc(pp, custom_acc, objects)
         if speed == -1:
             puts_ht.append({
                 Beatmap.HT_STAR: star
@@ -390,7 +394,6 @@ def fetch():
         fetch_best_performance(game_mode='mania')
         fetch_beatmap_top_scores(game_mode='mania', variant='4k')
         fetch_beatmap_top_scores(game_mode='mania', variant='7k')
-        apply_speed_on_beatmap("mania")
         # std (in progress)
         # for variant in ['4k', '7k']:
         #     for country in [None, "CN", "US"]:
@@ -402,6 +405,7 @@ def fetch():
         # fetch_beatmap_top_scores(game_mode='mania', variant='7k')
         # apply_speed_on_beatmap("mania")
         post_process_db()
+        apply_speed_on_beatmap("mania")
     except Exception as e:
         print("ERROR: " + str(api.recent_request))
         raise e
