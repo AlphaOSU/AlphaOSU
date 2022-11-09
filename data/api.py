@@ -6,22 +6,35 @@ import time
 session = None
 recent_request = None
 recent_request_time = 0
+secret_object = None
 
 DEBUG = False
 REQUEST_MIN_INTERVAL = 1
 
-def request_api(api, method, end_point='https://osu.ppy.sh/api/v2/', params=None, header=None, retry_count=0):
+OSU_WEBSITE = 'https://osu.ppy.sh/'
+
+def get_secret_value(key, default=None):
+    global secret_object
+    if secret_object is None:
+        with open(os.path.join("data", "secret.json")) as f:
+            secret_object = json.load(f)
+    return secret_object.get(key, default)
+
+def request_api(api, method, end_point=None, params=None, header=None, retry_count=0):
     if params is None:
         params = {}
     if header is None:
         header = {}
+    if end_point is None:
+        end_point = get_secret_value("osu_website", OSU_WEBSITE)
+        end_point = end_point + "api/v2/"
     url = end_point + api
     global session, recent_request, recent_request_time, REQUEST_MIN_INTERVAL
     if session is None:
         session = requests.Session()
     recent_request = "{method} {url} params: {params}, headers: {headers}".format(
         method=method, url=url,
-        params=params,
+            params=params,
         headers=header)
     if DEBUG:
         print(recent_request)
@@ -48,10 +61,10 @@ def request_api(api, method, end_point='https://osu.ppy.sh/api/v2/', params=None
 
 
 def auth(params, save_name):
-    with open(os.path.join("data", "secret.json")) as f:
-        secret = json.load(f)
-    params.update(secret)
-    auth_data = request_api('token', 'post', end_point='https://osu.ppy.sh/oauth/',
+    for oauth_key in ['client_id', 'client_secret', 'redirect_uri', 'scope']:
+        params[oauth_key] = get_secret_value(oauth_key)
+    osu_website = get_secret_value("osu_website", OSU_WEBSITE)
+    auth_data = request_api('token', 'post', end_point=f'{osu_website}oauth/',
                             params=params)
     auth_data['expire_time'] = time.time() + auth_data['expires_in'] - 3600
     print("auth success!")

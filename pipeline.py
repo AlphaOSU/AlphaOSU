@@ -42,11 +42,9 @@ class RedirectLogger:
 def register_log_output(name):
     if type(sys.stdout) == RedirectLogger:
         sys.stdout = sys.stdout.stdout
-        # sys.stderr = sys.stderr.stdout
 
     sys.stdout = RedirectLogger(name, sys.stdout)
     print(name)
-    # sys.stderr = RedirectLogger(name, sys.stderr)
 
 
 if __name__ == "__main__":
@@ -113,4 +111,4 @@ if __name__ == "__main__":
         except ImportError:
             def fail():
                 pass
-            fail()
+        fail()

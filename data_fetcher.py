@@ -111,7 +111,13 @@ def fetch_user_ranking(game_mode, variant, max_page=10000, country=None):
                                                   User.GAME_MODE: user_data[User.GAME_MODE],
                                                   User.VARIANT: user_data[User.VARIANT],
                                               })
-                user_data[User.DIRTY] = old is None or abs(float(old[0]) - float(user_data[User.PP])) > 0.1
+                old_pp = 0
+                if old is not None:
+                    old_pp = float(old[0])
+                new_pp = float(user_data[User.PP])
+                user_data[User.DIRTY] = abs(old_pp - new_pp) > 0.1
+                if user_data[User.DIRTY]:
+                    print(f"[Dirty] {user_data[User.NAME]} - {user_data[User.ID]}: old = {old_pp}, new = {new_pp}")
 
             repository.insert_or_replace(conn_ranking, User.TABLE_NAME, db_data)
             if current_count / total_count > current_page / max_page:
@@ -133,7 +139,7 @@ def fetch_best_performance_for_user(game_mode, user_id, connection):
     if 'error' in data:
         print("ERROR: " + api.recent_request)
         # user does not exist, skip!!
-        return None
+        return None, None
 
     def filter_beatmap(x):
         beatmap = x['beatmap']
@@ -157,25 +163,26 @@ def fetch_best_performance_for_user(game_mode, user_id, connection):
 def fetch_best_performance(game_mode, max_user=100000):
     conn = repository.get_connection()
     with conn:
-        user_id_name = list(repository.select(
-            conn, User.TABLE_NAME, ['DISTINCT ' + User.ID, User.NAME, User.PP],
+        user_id_set = set(map(lambda x: x[0], repository.select(
+            conn, User.TABLE_NAME, [User.ID],
             where={
                 User.GAME_MODE: game_mode,
                 User.DIRTY: True
-            }, limit=max_user, order_by=User.RANK))
-        user_id_name = list(filter(lambda x: x[2] >= 1000, user_id_name))
-    progress_control = ProgressControl("fetch_best_performance_%s" % (game_mode), len(user_id_name))
+            }, limit=max_user, order_by=User.RANK)))
+    progress_control = ProgressControl("fetch_best_performance_%s" % (game_mode), len(user_id_set))
     previous_state = int(progress_control.get_state(-1))
-    for i, (user_id, user_name, pp) in enumerate(user_id_name):
-        print(user_id, user_name, pp)
+    for i, user_id in enumerate(user_id_set):
+        print(f"[Best performance] {user_id}")
         if i <= previous_state:
             continue
         beatmap_db_data, score_db_data = fetch_best_performance_for_user(game_mode, user_id, conn)
+        if beatmap_db_data is None or score_db_data is None:
+            continue
 
         with conn:
             repository.insert_or_replace(conn, Beatmap.TABLE_NAME, beatmap_db_data)
             insert_scores(conn, score_db_data)
-            progress_control.commit(str(i), i + 1, len(user_id_name), conn)
+            progress_control.commit(str(i), i + 1, len(user_id_set), conn)
     with conn:
         repository.update(conn, User.TABLE_NAME, puts=[{
             User.DIRTY: False
@@ -275,8 +282,7 @@ def fetch_beatmap_top_scores(game_mode, variant, max_beatmap=100000):
                                             len(beatmap_ids) * 6, connection)
                 # break
 
-
-def insert_scores(conn, score_db_data):
+def filter_score_data(conn, score_db_data):
     data = []
     for score_dict in score_db_data:
         previous_pp = repository.select(conn, Score.TABLE_NAME, project=[Score.PP], where={
@@ -287,6 +293,10 @@ def insert_scores(conn, score_db_data):
         # We only insert the scores with the highest pp.
         if previous_pp is None or previous_pp[0] < score_dict[Score.PP]:
             data.append(score_dict)
+    return data
+
+def insert_scores(conn, score_db_data):
+    data = filter_score_data(conn, score_db_data)
     repository.insert_or_replace(conn, Score.TABLE_NAME, data, or_ignore=False)
 
 
