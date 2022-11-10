@@ -81,21 +81,20 @@ k_acc = (2 - 2 * ep) / (max_acc - min_acc)
 b_acc = -k_acc * min_acc - 1 + ep
 
 
-# @measure_time
 def map_osu_score(score, real_to_train: bool, arctanh=np.arctanh, tanh=np.tanh):
-    global k_score, b_score, scale
+    global k_score, b_score, min_score, max_score
     if real_to_train:
         return arctanh(k_score * np.clip(score, min_score, max_score) + b_score)
     else:
-        return np.minimum((tanh(score) - b_score) / k_score, max_score)
+        return np.clip((tanh(score) - b_score) / k_score, min_score, max_score)
 
 
 def map_osu_acc(acc, real_to_train: bool, arctanh=np.arctanh, tanh=np.tanh):
-    global k_acc, b_acc
+    global k_acc, b_acc, min_acc, max_acc
     if real_to_train:
-        return arctanh(k_acc * acc + b_acc)
+        return arctanh(k_acc * np.clip(acc, min_acc, max_acc) + b_acc)
     else:
-        return (tanh(acc) - b_acc) / k_acc
+        return np.clip((tanh(acc) - b_acc) / k_acc, min_acc, max_acc)
 
 
 def predict_score_std(connection, uid, variant, config: NetworkConfig, bid, mod):
@@ -159,7 +158,6 @@ def predict_score_std(connection, uid, variant, config: NetworkConfig, bid, mod)
     return x, std
 
 
-# @measure_time
 def predict_score(connection, where_dict, embedding_size, projection, limit=None):
     project_templates = []
     for i in range(embedding_size):

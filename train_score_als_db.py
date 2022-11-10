@@ -16,13 +16,7 @@ from data.model import *
 def linear_square(scores, x, weights, epoch, config):
     y = scores
 
-    if epoch <= 3:
-        x += np.random.normal(scale=0.01 * (3 - epoch) / 3, size=x.shape)
-
-    if epoch <= 1:
-        regr = LinearRegression(fit_intercept=False)
-    else:
-        regr = BayesianRidge(fit_intercept=False)
+    regr = BayesianRidge(fit_intercept=False)
     regr.fit(x, y, weights)
     y_pred = regr.predict(x)
     r2 = r2_score(y, y_pred, sample_weight=weights)
@@ -33,12 +27,8 @@ def linear_square(scores, x, weights, epoch, config):
         r2_adj = r2
     mse = mean_absolute_error(y, y_pred, sample_weight=weights)
     emb = regr.coef_
-    if epoch <= 1:
-        sigma = np.zeros((config.embedding_size, config.embedding_size))
-        alpha = 0.0
-    else:
-        sigma = regr.sigma_
-        alpha = regr.alpha_
+    sigma = regr.sigma_
+    alpha = regr.alpha_
 
     return (emb, sigma, alpha, (r2, mse, r2_adj))
 
