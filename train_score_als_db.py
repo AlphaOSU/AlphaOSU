@@ -15,6 +15,18 @@ from data.model import *
 # input: x^T w, estimate x
 
 def linear_square(scores, x, weights, epoch, config):
+    """
+    Find a W to minimize ||scores - W^T x||^2, using Bayesian Linear Square.
+    :param scores: shape = [N, ]
+    :param x: shape = [N, E]
+    :param weights: shape = [N, ], the weight for each data sample
+    :param epoch: training epoch
+    :param config: training config
+    :return: (emb, sigma, alpha, (r2, mse, r2_adj))
+        - emb: shape = [E, ], the optimal W
+        - sigma, alpha: shape = [E, E] and [1], the Bayesian parameters for estimating uncertainty
+        - r2, mse, r2_adj: training statistics
+    """
     y = scores
 
     regr = BayesianRidge(fit_intercept=False)
@@ -39,6 +51,19 @@ speed_to_mod_map = ['HT', 'NM', 'DT']
 
 def get_user_train_data(user_key, weights: ScoreModelWeight,
                         config: NetworkConfig, connection, epoch):
+    """
+    get the training data (scores) for a user from database
+    :param user_key: the target user, in the format of {user_id}-{game_mode}-{variant}
+    :param weights: model weights
+    :param config: training config
+    :param connection: database connection
+    :param epoch: training epoch
+    :return: (scores, beatmap_id_array, mod_id_array, weights)
+        - scores: shape = [N, ]
+        - beatmap_id_array: shape = [N, ], the embedding id of weights.beatmap_embedding
+        - mod_id_array: shape = [N, ], the embedding id of weights.mod_embedding
+        - weights: shape = [N, ], training weight for each data sample.
+    """
     user_id, user_mode, user_variant = user_key.split("-")
     if user_mode != config.game_mode:
         return None
@@ -90,6 +115,19 @@ def get_user_train_data(user_key, weights: ScoreModelWeight,
 
 def get_beatmap_train_data(beatmap_key, weights: ScoreModelWeight,
                            config: NetworkConfig, connection, epoch):
+    """
+    get the training data (scores) for a beatmap from database
+    :param beatmap_key: the target beatmap, in the format of beatmap_id
+    :param weights: model weights
+    :param config: training config
+    :param connection: database connection
+    :param epoch: training epoch
+    :return: (scores, user_id_array, mod_id_array, weights)
+        - scores: shape = [N, ]
+        - user_id_array: shape = [N, ], the embedding id of weights.user_embedding
+        - mod_id_array: shape = [N, ], the embedding id of weights.mod_embedding
+        - weights: shape = [N, ], training weight for each data sample.
+    """
     sql = (
         f"SELECT s.user_id, s.cs, s.speed, s.score, s.{Score.CUSTOM_ACCURACY} "
         f"FROM {Score.TABLE_NAME} as s "
@@ -147,6 +185,20 @@ def get_beatmap_train_data(beatmap_key, weights: ScoreModelWeight,
 
 def get_mod_train_data(mod_key, weights: ScoreModelWeight,
                        config: NetworkConfig, connection, epoch):
+    """
+    get the training data (scores) for a mod from database.
+    WARNING: this may
+    :param mod_key: the target mod. For example, DT.
+    :param weights: model weights
+    :param config: training config
+    :param connection: database connection
+    :param epoch: training epoch
+    :return: (scores, user_id_array, mod_id_array, weights)
+        - scores: shape = [N, ]
+        - user_id_array: shape = [N, ], the embedding id of weights.user_embedding
+        - mod_id_array: shape = [N, ], the embedding id of weights.mod_embedding
+        - weights: shape = [N, ], training weight for each data sample.
+    """
     speed = 0
     if mod_key.startswith("HT"):
         speed = -1
@@ -215,12 +267,31 @@ def mean(arr):
     return sum(arr) / len(arr)
 
 
-def train_embedding(key, get_data_method, weights, config, connection, epoch,
+def train_embedding(key, get_data_method, weights: ScoreModelWeight, config, connection, epoch,
                     embedding_data: EmbeddingData,
                     training_statistics: TrainingStatistics, pbar,
                     other_embedding_data: EmbeddingData,
-                    other_embedding_data2: EmbeddingData, 
+                    other_embedding_data2: EmbeddingData,
                     cachable=True):
+    """
+    A common method to train embedding (user / beatmap / mod). Traning results will be saved in
+    embedding_data.
+    For example, when training user embedding, other_embedding_data / other_embedding_data2 are
+    the beatmap / mod embedding data. key is the user_key.
+    :param key: target key
+    :param get_data_method: the method to get training data for key
+    :param weights: ScoreModelWeight
+    :param config: training config
+    :param connection: database connection
+    :param epoch: training epoch
+    :param embedding_data: an EmbeddingData to save the embedding for key
+    :param training_statistics: a TrainingStatistics to save the statistics
+    :param pbar: progress bar
+    :param other_embedding_data: an EmbeddingData oppository to embedding_data
+    :param other_embedding_data2: another EmbeddingData oppository to embedding_data
+    :param cachable: can the data returned by get_data_method be cached to save time
+    :return: nothing
+    """
     time_io = time.time()
     global cache
     if key in cache:
@@ -242,7 +313,6 @@ def train_embedding(key, get_data_method, weights, config, connection, epoch,
     (emb, sigma, alpha, metrics) = linear_square(scores, x, regression_weights, epoch, config)
     time_ls = time.time() - time_ls
 
-    
     emb_id = embedding_data.key_to_embed_id[key]
     embedding_data.embeddings[0][emb_id] = emb
     embedding_data.sigma[emb_id] = sigma
@@ -263,11 +333,11 @@ def train_embedding(key, get_data_method, weights, config, connection, epoch,
         training_statistics.as_times.append(time_assign)
         as_times_mean = np.mean(training_statistics.as_times) * 1000
         pbar.set_description(f"[{epoch}] {training_statistics.desc} io:{io_time_mean:.2f}ms "
-                            f"ls:{ls_time_mean:.2f}ms "
-                            f"as:{as_times_mean:.2f}ms "
-                            f"r2:{mean(training_statistics.r2_list):.4f} "
-                            f"r2_adj:{mean(training_statistics.r2_adj_list):.4f} "
-                            f"mse:{mean(training_statistics.mse_list):.4f}")
+                             f"ls:{ls_time_mean:.2f}ms "
+                             f"as:{as_times_mean:.2f}ms "
+                             f"r2:{mean(training_statistics.r2_list):.4f} "
+                             f"r2_adj:{mean(training_statistics.r2_adj_list):.4f} "
+                             f"mse:{mean(training_statistics.mse_list):.4f}")
 
 
 def train_score_by_als(config: NetworkConfig):
@@ -320,7 +390,7 @@ def train_score_by_als(config: NetworkConfig):
                                     ModEmbedding.TABLE_NAME,
                                     ModEmbedding.EMBEDDING)
         Meta.save(connection, "score_embedding_version",
-                    time.strftime("%Y%m%d%H%M%S", time.localtime(time.time())))
+                  time.strftime("%Y%m%d%H%M%S", time.localtime(time.time())))
         connection.commit()
         # test_score.test_predict_with_sql()
 
@@ -333,9 +403,10 @@ def train_score_by_als(config: NetworkConfig):
                                 weights.mod_embedding, statistics, pbar, weights.user_embedding,
                                 weights.beatmap_embedding, cachable=False)
             print(pbar.desc)
+
             def cos_sim(a, b):
                 return np.dot(a, b) / (np.linalg.norm(a) + 1e-6) / (np.linalg.norm(b) + 1e-6)
-        
+
             for idx_i, i in enumerate(weights.mod_embedding.key_to_embed_id.keys()):
                 for idx_j, j in enumerate(weights.mod_embedding.key_to_embed_id.keys()):
                     if idx_i <= idx_j:
@@ -356,8 +427,10 @@ def update_score_count(conn):
     repository.ensure_column(conn, BeatmapEmbedding.TABLE_NAME, [("count_DT", "integer", 0)])
     for speed in [-1, 0, 1]:
         mod = ['HT', 'NM', 'DT'][speed + 1]
-        repository.execute_sql(conn, f"UPDATE BeatmapEmbedding SET count_{mod} = (SELECT COUNT(1) FROM Score WHERE Score.beatmap_id == BeatmapEmbedding.id AND Score.speed == {speed})")
-    repository.execute_sql(conn, "UPDATE UserEmbedding SET count = (SELECT COUNT(1) FROM Score WHERE Score.user_id == UserEmbedding.id AND Score.game_mode == UserEmbedding.game_mode AND (Score.cs || 'k') == UserEmbedding.variant)")
+        repository.execute_sql(conn,
+                               f"UPDATE BeatmapEmbedding SET count_{mod} = (SELECT COUNT(1) FROM Score WHERE Score.beatmap_id == BeatmapEmbedding.id AND Score.speed == {speed})")
+    repository.execute_sql(conn,
+                           "UPDATE UserEmbedding SET count = (SELECT COUNT(1) FROM Score WHERE Score.user_id == UserEmbedding.id AND Score.game_mode == UserEmbedding.game_mode AND (Score.cs || 'k') == UserEmbedding.variant)")
     conn.commit()
 
 
@@ -390,6 +463,7 @@ def prepare_var_param(config: NetworkConfig):
     data = pd.DataFrame(data, columns=['y', 'predict', 'var_b', 'var_u', 'var_m'])
     data.to_sql("VarTest", connection, if_exists='replace')
 
+
 def estimate_var_param(config):
     connection = repository.get_connection()
     data = pd.read_sql_query("SELECT * FROM VarTest", connection)
@@ -410,6 +484,7 @@ def estimate_var_param(config):
     initial = np.asarray((1 / 3, 1 / 3, 1 / 3))
 
     optimize.minimize(error, initial * scale)
+
 
 if __name__ == "__main__":
     import sys
