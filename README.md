@@ -15,9 +15,33 @@ Link: https://alphaosu.keytoix.vip/
 
 ## Setup environment
 
+- First, install the python requirements.
+
 ```bash
 pip install -r requirements.txt
 ```
+
+- Second, clone the project [osu-tools](https://github.com/ppy/osu-tools/) and setup the environment of osu-tools. You may need to install .NET 6.0 SDK.
+
+- Finally, write a `data/secret.json` file. The content is like:
+
+```json
+{
+    "client_id": "<client_id>",
+    "client_secret": "<client_secret>",
+    "redirect_uri": "<redirect_uri>",
+    "scope": "public",
+    "osu_website": "https://osu.ppy.sh/",
+    "osu_tools_command": [
+        "dotnet",
+        "run", 
+        "--project", 
+        "<path to osu_tools>/PerformanceCalculator"
+    ]
+}
+```
+
+Please setup an osu oauth application to get `client_id`, `client_secret` and `redirect_uri`. You may need a osu! supporter account to fetch DT/HT/Country rankings.
 
 ## Run the whole pipeline
 
