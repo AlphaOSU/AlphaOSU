@@ -6,6 +6,7 @@ import data_fetcher
 import train_pass_kernel
 import train_score_als_db
 from data.model import *
+import time
 
 
 class RedirectLogger:

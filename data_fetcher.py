@@ -12,7 +12,6 @@ from data.model import *
 def ensure_beatmap_star(beatmap_id, ht_star, dt_star):
     if ht_star != 0 and dt_star != 0:
         return ht_star, dt_star
-    print(f"Download beatmap {beatmap_id} for difficulty calculation")
     osu_website = api.get_secret_value("osu_website", api.OSU_WEBSITE)
     r = api.request_api(f"osu/{beatmap_id}", "GET", osu_website, json=False)
     base_cache = os.path.join("result", "cache")
@@ -28,6 +27,7 @@ def ensure_beatmap_star(beatmap_id, ht_star, dt_star):
         dt_star = osu_utils.invoke_osu_tools(beatmap_path, dt_star=True)
 
     os.remove(beatmap_path)
+    print(f"Calculate star: {beatmap_id}, ht = {ht_star}, dt = {dt_star}")
     return ht_star, dt_star
 
 
@@ -212,20 +212,24 @@ def fetch_user_ranking(game_mode, variant, max_page=10000, country=None):
         with conn_ranking:
 
             for user_data in db_data:
-                old = repository.select_first(conn_ranking, User.TABLE_NAME, project=[User.PP],
+                old = repository.select_first(conn_ranking, User.TABLE_NAME, project=[User.PP, User.DIRTY],
                                               where={
                                                   User.ID: user_data[User.ID],
                                                   User.GAME_MODE: user_data[User.GAME_MODE],
                                                   User.VARIANT: user_data[User.VARIANT],
                                               })
                 old_pp = 0
+                old_dirty = False
                 if old is not None:
                     old_pp = float(old[0])
+                    old_dirty = old[1]
                 new_pp = float(user_data[User.PP])
                 user_data[User.DIRTY] = abs(old_pp - new_pp) > 0.1
                 if user_data[User.DIRTY]:
                     print(
                         f"[Dirty] {user_data[User.NAME]} - {user_data[User.ID]}: old = {old_pp}, new = {new_pp}")
+                if old_dirty:
+                    user_data[User.DIRTY] = old_dirty
 
             repository.insert_or_replace(conn_ranking, User.TABLE_NAME, db_data)
             if current_count / total_count > current_page / max_page:
@@ -237,7 +241,6 @@ def fetch_user_ranking(game_mode, variant, max_page=10000, country=None):
             progress_control.commit(str(current_count) + " " + str(current_page),
                                     current_progress, total_progress,
                                     conn_ranking)
-    # conn_ranking.close()
 
 
 def fetch_best_performance_for_user(game_mode, user_id, connection):
