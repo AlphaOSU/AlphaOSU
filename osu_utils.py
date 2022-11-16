@@ -214,7 +214,7 @@ def estimate_user_embedding(user_bp: BestPerformance):
     return emb
 
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
     # with repository.get_connection() as conn:
     #     bp = get_user_bp(conn, uid, NetworkConfig())
     #     print(estimate_user_embedding(bp))
