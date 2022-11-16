@@ -1,11 +1,11 @@
-from posixpath import dirname
-from data import repository
-import sqlite3
-import time
 import os
-import pandas as pd
+import sqlite3
+import bisect
+
 import numpy as np
-from dateutil import parser
+import pandas as pd
+
+from data import repository
 
 
 class User:
@@ -189,13 +189,6 @@ class Beatmap:
         }
 
 
-BEATMAP_FEATURES = [Beatmap.CS, Beatmap.OD,  # Beatmap.AR, Beatmap.HP,
-                    Beatmap.STAR, Beatmap.DT_STAR, Beatmap.HT_STAR,
-                    # Beatmap.PASS_COUNT, Beatmap.PLAY_COUNT,
-                    Beatmap.BPM, Beatmap.LENGTH,
-                    Beatmap.COUNT_CIRCLES, Beatmap.COUNT_SLIDERS]  # , Beatmap.COUNT_SPINNERS]
-
-
 class Score:
     TABLE_NAME = "Score"
 
@@ -340,76 +333,6 @@ class Meta:
         ])
 
 
-def parse_beatmap_data(beatmap_data, beatmapset_data, conn: sqlite3.Connection):
-    if beatmap_data['status'] != 'ranked':
-        return None
-    if beatmap_data['convert']:
-        return None
-    old_sum = repository.select_first(conn, Beatmap.TABLE_NAME, project=[Beatmap.SUM_SCORES],
-                                      where={Beatmap.ID: beatmap_data['id']})
-    if old_sum is None:
-        old_sum = 0
-    else:
-        old_sum = old_sum[0]
-    result = {
-        Beatmap.ID: beatmap_data['id'],
-        Beatmap.SET_ID: beatmap_data['beatmapset_id'],
-        Beatmap.NAME: beatmapset_data['title'],
-        Beatmap.VERSION: beatmap_data['version'],
-        Beatmap.GAME_MODE: beatmap_data['mode'],
-        Beatmap.CREATOR: beatmapset_data['creator'],
-        Beatmap.SUM_SCORES: old_sum,
-
-        Beatmap.LENGTH: beatmap_data['hit_length'],
-        Beatmap.BPM: beatmap_data['bpm'],
-        Beatmap.CS: beatmap_data['cs'],
-        Beatmap.HP: beatmap_data['drain'],
-        Beatmap.OD: beatmap_data['accuracy'],
-        Beatmap.AR: beatmap_data['ar'],
-        Beatmap.STAR: beatmap_data['difficulty_rating'],
-        Beatmap.COUNT_CIRCLES: beatmap_data['count_circles'],
-        Beatmap.COUNT_SLIDERS: beatmap_data['count_sliders'],
-        Beatmap.COUNT_SPINNERS: beatmap_data['count_spinners'],
-        Beatmap.PASS_COUNT: beatmap_data['passcount'],
-        Beatmap.PLAY_COUNT: beatmap_data['playcount']
-    }
-    return result
-
-
-def parse_score_data(scores, beatmap_id, is_in_top_scores):
-    is_dt = 'DT' in scores['mods'] or 'NC' in scores['mods']
-    is_ht = 'HT' in scores['mods']
-    result = {
-        Score.BEATMAP_ID: beatmap_id,
-        Score.USER_ID: scores['user_id'],
-        Score.SCORE_ID: scores['id'],
-        Score.SPEED: 1 if is_dt else (-1 if is_ht else 0),
-        Score.IS_DT: is_dt,
-        Score.IS_HR: 'HR' in scores['mods'],
-        Score.IS_HD: 'HD' in scores['mods'],
-        Score.IS_FL: 'FL' in scores['mods'],
-        Score.IS_EZ: 'EZ' in scores['mods'],
-        Score.IS_MR: 'MR' in scores['mods'],
-        Score.IS_HT: is_ht,
-        Score.CREATE_AT: int(parser.parse(scores['created_at']).timestamp()),
-
-        Score.ACCURACY: scores['accuracy'],
-        Score.SCORE: scores['score'],
-        Score.MAX_COMBO: scores['max_combo'],
-        Score.COUNT_50: scores['statistics']['count_50'],
-        Score.COUNT_100: scores['statistics']['count_100'],
-        Score.COUNT_300: scores['statistics']['count_300'],
-        Score.COUNT_geki: scores['statistics']['count_geki'],
-        Score.COUNT_katu: scores['statistics']['count_katu'],
-        Score.COUNT_miss: scores['statistics']['count_miss'],
-        Score.PP: scores.get('pp', 0),
-        Score.PP_WEIGHT: scores.get('weight', {}).get('percentage', 0),
-    }
-    if result[Score.PP] is None:
-        result[Score.PP] = 0
-    return result
-
-
 def measure_time(fun):
     def decorate(*c, **d):
         # start_time = time.time()
@@ -472,9 +395,6 @@ class ScoreModelWeight:
         self.feature_weights = feature_weights
 
 
-import bisect
-
-
 class BestPerformance:
 
     def __init__(self, max_length=100):
@@ -506,7 +426,8 @@ class BestPerformance:
 
     def get_score_pp(self, bid):
         if bid in self.data:
-            return self.data[bid][0], self.data[bid][1], self.data[bid][2], self.data[bid][3], self.data[bid][4]
+            return self.data[bid][0], self.data[bid][1], self.data[bid][2], self.data[bid][3], \
+                   self.data[bid][4]
         return None, None, None, None, None
 
     def copy(self):
@@ -516,14 +437,15 @@ class BestPerformance:
         new.pp_order_list = self.pp_order_list.copy()
         return new
 
+
 def get_pass_model_path(speed, result_path="result", is_training=False):
     path = os.path.join(get_pass_model_dir(speed, result_path), f"model")
     if is_training:
         path += "_train"
     return path
 
+
 def get_pass_model_dir(speed, result_path="result"):
     dir_name = os.path.join(result_path, f"pass_xgboost_{speed}")
     os.makedirs(dir_name, exist_ok=True)
     return dir_name
-

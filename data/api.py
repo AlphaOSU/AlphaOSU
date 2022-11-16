@@ -13,6 +13,7 @@ REQUEST_MIN_INTERVAL = 1
 
 OSU_WEBSITE = 'https://osu.ppy.sh/'
 
+
 def get_secret_value(key, default=None):
     global secret_object
     if secret_object is None:
@@ -20,7 +21,9 @@ def get_secret_value(key, default=None):
             secret_object = json.load(f)
     return secret_object.get(key, default)
 
-def request_api(api, method, end_point=None, params=None, header=None, retry_count=0):
+
+def request_api(api, method, end_point=None, params=None, header=None, retry_count=0, json=True,
+                stream=False):
     if params is None:
         params = {}
     if header is None:
@@ -34,7 +37,7 @@ def request_api(api, method, end_point=None, params=None, header=None, retry_cou
         session = requests.Session()
     recent_request = "{method} {url} params: {params}, headers: {headers}".format(
         method=method, url=url,
-            params=params,
+        params=params,
         headers=header)
     if DEBUG:
         print(recent_request)
@@ -46,16 +49,19 @@ def request_api(api, method, end_point=None, params=None, header=None, retry_cou
 
     try:
         if method.lower() == 'get':
-            response = session.get(url, params=params, timeout=60, headers=header).json()
+            response = session.get(url, params=params, timeout=60, headers=header, stream=stream)
         else:
-            response = session.post(end_point + api, data=params, timeout=60, headers=header).json()
+            response = session.post(end_point + api, data=params, timeout=60, headers=header,
+                                    stream=stream)
+        if json:
+            response = response.json()
     except Exception as e:
         if retry_count >= 5:
             raise e
         session = None
         print("retry...")
         time.sleep(10 + retry_count * 30)
-        return request_api(api, method, end_point, params, header, retry_count + 1)
+        return request_api(api, method, end_point, params, header, retry_count + 1, json)
     recent_request += " -> " + str(response)
     return response
 

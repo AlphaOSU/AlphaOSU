@@ -1,6 +1,11 @@
 from sklearn.linear_model import LinearRegression
 
 from data.model import *
+from data import api
+
+import subprocess
+import json
+
 
 def estimate_star_from_acc(pp, custom_acc, objects):
     acc_pp = max(5 * custom_acc - 4, 0)
@@ -10,6 +15,22 @@ def estimate_star_from_acc(pp, custom_acc, objects):
     diff_pp = pp / acc_pp / length_pp / 8.0
     star = diff_pp ** (1 / 2.2) + 0.15
     return star
+
+
+def invoke_osu_tools(beatmap_path, dt_star=False, ht_star=False):
+    cmd = list(api.get_secret_value("osu_tools_command", []))
+    assert len(cmd) > 0
+    cmd.extend(["difficulty", beatmap_path, "-j"])
+    if dt_star:
+        cmd.extend(["-m", "DT"])
+    elif ht_star:
+        cmd.extend(["-m", "HT"])
+    print(f"Invoke osu tools: {cmd}")
+    result = json.loads(subprocess.check_output(cmd))
+    if dt_star or ht_star:
+        return result['results'][0]['attributes']['star_rating']
+    return result
+
 
 def estimate_star_from_score(pp, score, objects, od):
     l = 1 + 0.1 * min(1500, objects) / 1500
@@ -185,7 +206,8 @@ WHERE {wheres} AND Beatmap.id == BeatmapEmbedding.id
 
 @measure_time
 def get_user_bp(connection, user_id,
-                config: NetworkConfig, max_length=100, is_acc=False):  # return (bid, speed) -> (score, pp)
+                config: NetworkConfig, max_length=100,
+                is_acc=False):  # return (bid, speed) -> (score, pp)
     if is_acc:
         score = Score.CUSTOM_ACCURACY
     else:
