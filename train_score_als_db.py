@@ -1,5 +1,6 @@
 import json
 import math
+import time
 
 from sklearn.linear_model import BayesianRidge, LinearRegression
 from sklearn.metrics import r2_score, mean_absolute_error
@@ -14,6 +15,18 @@ from data.model import *
 # input: x^T w, estimate x
 
 def linear_square(scores, x, weights, epoch, config):
+    """
+    Find a W to minimize ||scores - W^T x||^2, using Bayesian Linear Square.
+    :param scores: shape = [N, ]
+    :param x: shape = [N, E]
+    :param weights: shape = [N, ], the weight for each data sample
+    :param epoch: training epoch
+    :param config: training config
+    :return: (emb, sigma, alpha, (r2, mse, r2_adj))
+        - emb: shape = [E, ], the optimal W
+        - sigma, alpha: shape = [E, E] and [1], the Bayesian parameters for estimating uncertainty
+        - r2, mse, r2_adj: training statistics
+    """
     y = scores
 
     regr = BayesianRidge(fit_intercept=False)
@@ -31,6 +44,7 @@ def linear_square(scores, x, weights, epoch, config):
     alpha = regr.alpha_
 
     return (emb, sigma, alpha, (r2, mse, r2_adj))
+
 
 
 speed_to_mod_map = ['HT', 'NM', 'DT']
@@ -218,7 +232,7 @@ def train_embedding(key, get_data_method, weights, config, connection, epoch,
                     embedding_data: EmbeddingData,
                     training_statistics: TrainingStatistics, pbar,
                     other_embedding_data: EmbeddingData,
-                    other_embedding_data2: EmbeddingData, 
+                    other_embedding_data2: EmbeddingData,
                     cachable=True):
     time_io = time.time()
     global cache
@@ -241,7 +255,7 @@ def train_embedding(key, get_data_method, weights, config, connection, epoch,
     (emb, sigma, alpha, metrics) = linear_square(scores, x, regression_weights, epoch, config)
     time_ls = time.time() - time_ls
 
-    
+
     emb_id = embedding_data.key_to_embed_id[key]
     embedding_data.embeddings[0][emb_id] = emb
     embedding_data.sigma[emb_id] = sigma
@@ -271,17 +285,9 @@ def train_embedding(key, get_data_method, weights, config, connection, epoch,
 def train_personal_embedding(key, get_data_method, weights, config, connection,
                              epoch, embedding_data: EmbeddingData,
                              other_embedding_data: EmbeddingData,
-                             other_embedding_data2: EmbeddingData,
-                             cachable=True):
-    global cache
-    if key in cache:
-        data = cache[key]
-    else:
-        data = get_data_method(key, weights, config, connection, epoch)
-        if cachable:
-            cache[key] = data
-    if data is None:
-        return None
+                             other_embedding_data2: EmbeddingData):
+
+    data = get_data_method(key, weights, config, connection, epoch)
 
     scores, other_emb_id, other_emb_id2, regression_weights = data
     other_embs = other_embedding_data.embeddings[0][other_emb_id]
@@ -296,15 +302,16 @@ def train_personal_embedding(key, get_data_method, weights, config, connection,
     embedding_data.alpha[emb_id] = alpha
 
 
-def train_personal_embedding_online(config: NetworkConfig, key):
-    connection = repository.get_connection()
+def train_personal_embedding_online(config: NetworkConfig, key, connection):
 
-    weights = data_process.load_weight_online(config)
+    user_key = key  # list(weights.user_embedding.key_to_embed_id.keys())[1]
+    # def stability():
+
+    weights = data_process.load_weight_online(config, user_key, connection)
     weights.beatmap_embedding.key_to_embed_id = weights.beatmap_embedding.key_to_embed_id.to_dict()
     weights.user_embedding.key_to_embed_id = weights.user_embedding.key_to_embed_id.to_dict()
     weights.mod_embedding.key_to_embed_id = weights.mod_embedding.key_to_embed_id.to_dict()
 
-    user_key = key #list(weights.user_embedding.key_to_embed_id.keys())[1]
     train_personal_embedding(user_key, get_user_train_data, weights, config, connection, 200,
                              weights.user_embedding, weights.beatmap_embedding,
                              weights.mod_embedding)
