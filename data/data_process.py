@@ -35,7 +35,7 @@ def seed(source):
 
 
 def load_embedding(table_name, primary_keys, embedding_name, config: NetworkConfig,
-                   initializer=None):
+                   initializer=None, conn=None):
     """
     load EmbeddingData from database
     :param table_name: table name
@@ -61,7 +61,9 @@ def load_embedding(table_name, primary_keys, embedding_name, config: NetworkConf
     project += config.get_embedding_names(embedding_name)
     project.append(config.get_embedding_names(embedding_name, is_sigma=True))
     project.append(config.get_embedding_names(embedding_name, is_alpha=True))
-    with repository.get_connection() as conn:
+    if conn == None:
+        conn = repository.get_connection()
+    with conn:
         ensure_embedding_column(conn, table_name, embedding_name, config)
         cursor = repository.select(conn, table_name=table_name, project=project)
     for i, tpl in enumerate(cursor):
@@ -325,5 +327,5 @@ def load_weight_online(config: NetworkConfig, user_key, connection):
                                                               config, user_key, connection)
     weights.mod_embedding = load_embedding(ModEmbedding.TABLE_NAME,
                                            ModEmbedding.PRIMARY_KEYS,
-                                           ModEmbedding.EMBEDDING, config)
+                                           ModEmbedding.EMBEDDING, config, conn=connection)
     return weights
