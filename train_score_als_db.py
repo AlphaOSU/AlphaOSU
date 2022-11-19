@@ -46,7 +46,6 @@ def linear_square(scores, x, weights, epoch, config):
     return (emb, sigma, alpha, (r2, mse, r2_adj))
 
 
-
 speed_to_mod_map = ['HT', 'NM', 'DT']
 
 
@@ -255,7 +254,6 @@ def train_embedding(key, get_data_method, weights, config, connection, epoch,
     (emb, sigma, alpha, metrics) = linear_square(scores, x, regression_weights, epoch, config)
     time_ls = time.time() - time_ls
 
-
     emb_id = embedding_data.key_to_embed_id[key]
     embedding_data.embeddings[0][emb_id] = emb
     embedding_data.sigma[emb_id] = sigma
@@ -276,17 +274,17 @@ def train_embedding(key, get_data_method, weights, config, connection, epoch,
         training_statistics.as_times.append(time_assign)
         as_times_mean = np.mean(training_statistics.as_times) * 1000
         pbar.set_description(f"[{epoch}] {training_statistics.desc} io:{io_time_mean:.2f}ms "
-                            f"ls:{ls_time_mean:.2f}ms "
-                            f"as:{as_times_mean:.2f}ms "
-                            f"r2:{mean(training_statistics.r2_list):.4f} "
-                            f"r2_adj:{mean(training_statistics.r2_adj_list):.4f} "
-                            f"mse:{mean(training_statistics.mse_list):.4f}")
+                             f"ls:{ls_time_mean:.2f}ms "
+                             f"as:{as_times_mean:.2f}ms "
+                             f"r2:{mean(training_statistics.r2_list):.4f} "
+                             f"r2_adj:{mean(training_statistics.r2_adj_list):.4f} "
+                             f"mse:{mean(training_statistics.mse_list):.4f}")
+
 
 def train_personal_embedding(key, get_data_method, weights, config, connection,
                              epoch, embedding_data: EmbeddingData,
                              other_embedding_data: EmbeddingData,
                              other_embedding_data2: EmbeddingData):
-
     data = get_data_method(key, weights, config, connection, epoch)
 
     scores, other_emb_id, other_emb_id2, regression_weights = data
@@ -303,7 +301,6 @@ def train_personal_embedding(key, get_data_method, weights, config, connection,
 
 
 def train_personal_embedding_online(config: NetworkConfig, key, connection):
-
     user_key = key  # list(weights.user_embedding.key_to_embed_id.keys())[1]
     # def stability():
 
@@ -372,7 +369,7 @@ def train_score_by_als(config: NetworkConfig):
                                     ModEmbedding.TABLE_NAME,
                                     ModEmbedding.EMBEDDING)
         Meta.save(connection, "score_embedding_version",
-                    time.strftime("%Y%m%d%H%M%S", time.localtime(time.time())))
+                  time.strftime("%Y%m%d%H%M%S", time.localtime(time.time())))
         connection.commit()
         # test_score.test_predict_with_sql()
 
@@ -385,9 +382,10 @@ def train_score_by_als(config: NetworkConfig):
                                 weights.mod_embedding, statistics, pbar, weights.user_embedding,
                                 weights.beatmap_embedding, cachable=False)
             print(pbar.desc)
+
             def cos_sim(a, b):
                 return np.dot(a, b) / (np.linalg.norm(a) + 1e-6) / (np.linalg.norm(b) + 1e-6)
-        
+
             for idx_i, i in enumerate(weights.mod_embedding.key_to_embed_id.keys()):
                 for idx_j, j in enumerate(weights.mod_embedding.key_to_embed_id.keys()):
                     if idx_i <= idx_j:
@@ -408,8 +406,10 @@ def update_score_count(conn):
     repository.ensure_column(conn, BeatmapEmbedding.TABLE_NAME, [("count_DT", "integer", 0)])
     for speed in [-1, 0, 1]:
         mod = ['HT', 'NM', 'DT'][speed + 1]
-        repository.execute_sql(conn, f"UPDATE BeatmapEmbedding SET count_{mod} = (SELECT COUNT(1) FROM Score WHERE Score.beatmap_id == BeatmapEmbedding.id AND Score.speed == {speed})")
-    repository.execute_sql(conn, "UPDATE UserEmbedding SET count = (SELECT COUNT(1) FROM Score WHERE Score.user_id == UserEmbedding.id AND Score.game_mode == UserEmbedding.game_mode AND (Score.cs || 'k') == UserEmbedding.variant)")
+        repository.execute_sql(conn,
+                               f"UPDATE BeatmapEmbedding SET count_{mod} = (SELECT COUNT(1) FROM Score WHERE Score.beatmap_id == BeatmapEmbedding.id AND Score.speed == {speed})")
+    repository.execute_sql(conn,
+                           "UPDATE UserEmbedding SET count = (SELECT COUNT(1) FROM Score WHERE Score.user_id == UserEmbedding.id AND Score.game_mode == UserEmbedding.game_mode AND (Score.cs || 'k') == UserEmbedding.variant)")
     conn.commit()
 
 
@@ -442,6 +442,7 @@ def prepare_var_param(config: NetworkConfig):
     data = pd.DataFrame(data, columns=['y', 'predict', 'var_b', 'var_u', 'var_m'])
     data.to_sql("VarTest", connection, if_exists='replace')
 
+
 def estimate_var_param(config):
     connection = repository.get_connection()
     data = pd.read_sql_query("SELECT * FROM VarTest", connection)
@@ -462,6 +463,7 @@ def estimate_var_param(config):
     initial = np.asarray((1 / 3, 1 / 3, 1 / 3))
 
     optimize.minimize(error, initial * scale)
+
 
 if __name__ == "__main__":
     import sys

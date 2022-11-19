@@ -14,10 +14,12 @@ def ensure_embedding_column(conn, table_name, embedding_name, config: NetworkCon
     repository.ensure_column(conn, table_name=table_name,
                              name_type_default=columns)
 
+
 def seed(source):
-    s = abs(hash(source)) % 2**32
+    s = abs(hash(source)) % 2 ** 32
     np.random.seed(s)
     random.seed(s)
+
 
 def load_embedding(table_name, primary_keys, embedding_name, config: NetworkConfig,
                    initializer=None):
@@ -25,7 +27,7 @@ def load_embedding(table_name, primary_keys, embedding_name, config: NetworkConf
     key_to_embed_id = {}
     if initializer is None:
         def initializer(primary_values):
-            arr = (np.random.random((embedding_size, )) + 0.1) * np.sign(np.random.random((embedding_size, )) - 0.5)
+            arr = (np.random.random((embedding_size,)) + 0.1) * np.sign(np.random.random((embedding_size,)) - 0.5)
             # arr[-1] = 0.5 / embedding_size
             return arr
     embeddings = []
@@ -54,7 +56,7 @@ def load_embedding(table_name, primary_keys, embedding_name, config: NetworkConf
         embedding = np.asarray(embedding)
         embeddings.append(embedding)
         sigmas.append(sigma if (sigma is not None and sigma.shape == (embedding_size, embedding_size))
-                        else np.zeros((embedding_size, embedding_size), np.float64))
+                      else np.zeros((embedding_size, embedding_size), np.float64))
         alphas.append(alpha if alpha is not None else 0.0)
         key_to_embed_id["-".join(map(str, primary_values))] = i
     return EmbeddingData(
@@ -64,10 +66,12 @@ def load_embedding(table_name, primary_keys, embedding_name, config: NetworkConf
         alpha=np.asarray(alphas, np.float64)
     )
 
-def load_user_embedding_online(table_name, primary_keys, embedding_name, config: NetworkConfig, user_key, connection, initializer=None):
+
+def load_user_embedding_online(table_name, primary_keys, embedding_name, config: NetworkConfig, user_key, connection,
+                               initializer=None):
     if initializer is None:
         def initializer(primary_values):
-            arr = (np.random.random((embedding_size, )) + 0.1) * np.sign(np.random.random((embedding_size, )) - 0.5)
+            arr = (np.random.random((embedding_size,)) + 0.1) * np.sign(np.random.random((embedding_size,)) - 0.5)
             # arr[-1] = 0.5 / embedding_size
             return arr
     key_to_embed_id = {}
@@ -108,10 +112,9 @@ def load_user_embedding_online(table_name, primary_keys, embedding_name, config:
         alpha=np.asarray(alphas, np.float64)
     )
 
-def load_beatmap_embedding_online(table_name, primary_keys, embedding_name, config: NetworkConfig, user_key, connection, initializer=None):
 
-    ignore = 0
-
+def load_beatmap_embedding_online(table_name, primary_keys, embedding_name, config: NetworkConfig, user_key, connection,
+                                  ):
     key_to_embed_id = {}
     embeddings = []
     sigmas = []
@@ -148,7 +151,6 @@ def load_beatmap_embedding_online(table_name, primary_keys, embedding_name, conf
             if embedding[0] is None:
                 break
             if str(beatmap_id) in key_to_embed_id.keys():
-                ignore = ignore + 1
                 break
 
             embedding = np.asarray(embedding)
@@ -156,14 +158,13 @@ def load_beatmap_embedding_online(table_name, primary_keys, embedding_name, conf
             sigmas.append(sigma if (sigma is not None and sigma.shape == (embedding_size, embedding_size))
                           else np.zeros((embedding_size, embedding_size), np.float64))
             alphas.append(alpha if alpha is not None else 0.0)
-            key_to_embed_id["-".join(map(str, primary_values))] = k - ignore
+            key_to_embed_id["-".join(map(str, primary_values))] = len(embeddings) - 1
     return EmbeddingData(
-           key_to_embed_id=pd.Series(key_to_embed_id, name=table_name),
-           embeddings=[np.asarray(embeddings)],
-           sigma=np.asarray(sigmas, np.float64),
-           alpha=np.asarray(alphas, np.float64)
+        key_to_embed_id=pd.Series(key_to_embed_id, name=table_name),
+        embeddings=[np.asarray(embeddings)],
+        sigma=np.asarray(sigmas, np.float64),
+        alpha=np.asarray(alphas, np.float64)
     )
-
 
 
 def save_embedding(conn, embedding: EmbeddingData, config: NetworkConfig,
@@ -172,7 +173,7 @@ def save_embedding(conn, embedding: EmbeddingData, config: NetworkConfig,
     wheres = []
     ensure_embedding_column(conn, table_name, embedding_name, config)
 
-    def embedding_array_to_db_dict(embedding_array, key, alpha=None, sigma: np.ndarray=None):
+    def embedding_array_to_db_dict(embedding_array, key, alpha=None, sigma: np.ndarray = None):
         puts = dict(zip(config.get_embedding_names(key), embedding_array))
         if alpha is not None:
             puts[config.get_embedding_names(key, is_alpha=True)] = float(alpha)
@@ -253,8 +254,8 @@ def load_weight(config: NetworkConfig):
                                                BeatmapEmbedding.ITEM_EMBEDDING,
                                                config)
 
-
     m = ortho_group.rvs(dim=config.embedding_size)
+
     def mod_embedding_initializer2(primary_values):
         w = 0.1
         w2 = 0.5
@@ -311,21 +312,13 @@ def load_weight(config: NetworkConfig):
     # )
     return weights
 
+
 def load_weight_online(config: NetworkConfig, user_key, connection):
     weights = ScoreModelWeight()
     weights.user_embedding = load_user_embedding_online(UserEmbedding.TABLE_NAME,
                                                         UserEmbedding.PRIMARY_KEYS,
                                                         UserEmbedding.EMBEDDING,
                                                         config, user_key, connection)
-    # weights.user_embedding = load_embedding(UserEmbedding.TABLE_NAME,
-    #                                         UserEmbedding.PRIMARY_KEYS,
-    #                                         UserEmbedding.EMBEDDING,
-    #                                         config)
-
-    # weights.beatmap_embedding = load_embedding(BeatmapEmbedding.TABLE_NAME,
-    #                                            BeatmapEmbedding.PRIMARY_KEYS,
-    #                                            BeatmapEmbedding.ITEM_EMBEDDING,
-    #                                            config)
     weights.beatmap_embedding = load_beatmap_embedding_online(BeatmapEmbedding.TABLE_NAME,
                                                               BeatmapEmbedding.PRIMARY_KEYS,
                                                               BeatmapEmbedding.ITEM_EMBEDDING,
@@ -334,5 +327,3 @@ def load_weight_online(config: NetworkConfig, user_key, connection):
                                            ModEmbedding.PRIMARY_KEYS,
                                            ModEmbedding.EMBEDDING, config)
     return weights
-
-
