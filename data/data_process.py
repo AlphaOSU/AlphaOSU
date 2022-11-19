@@ -1,3 +1,4 @@
+import numpy as np
 from scipy.stats import ortho_group
 
 from data.model import *
@@ -90,46 +91,12 @@ def load_embedding(table_name, primary_keys, embedding_name, config: NetworkConf
 
 def load_user_embedding_online(table_name, primary_keys, embedding_name, config: NetworkConfig, user_key, connection,
                                initializer=None):
-    if initializer is None:
-        def initializer(primary_values):
-            arr = (np.random.random((embedding_size,)) + 0.1) * np.sign(np.random.random((embedding_size,)) - 0.5)
-            # arr[-1] = 0.5 / embedding_size
-            return arr
-    key_to_embed_id = {}
-    embeddings = []
-    sigmas = []
-    alphas = []
     embedding_size = config.embedding_size
-    constrain = UserEmbedding.construct_where_with_key(user_key)
-
-    project = list(primary_keys)
-    project += config.get_embedding_names(embedding_name)
-    project.append(config.get_embedding_names(embedding_name, is_sigma=True))
-    project.append(config.get_embedding_names(embedding_name, is_alpha=True))
-
-    cursor = repository.select(connection, table_name=table_name, project=project, where=constrain)
-
-    for i, tpl in enumerate(cursor):
-        primary_values = tpl[:len(primary_keys)]
-        seed(tuple(primary_values))
-        embedding = list(tpl[len(primary_keys):len(primary_keys) + embedding_size])
-        sigma = repository.db_to_np(tpl[-2])
-        alpha = tpl[-1]
-
-        for j in range(embedding_size):
-            if embedding[j] is None:
-                embedding = initializer(primary_values)
-                break
-        embeddings = np.asarray([embedding])
-        sigmas.append(sigma if (sigma is not None and sigma.shape == (embedding_size, embedding_size))
-                      else np.zeros((embedding_size, embedding_size), np.float64))
-        alphas.append(alpha if alpha is not None else 0.0)
-        key_to_embed_id["-".join(map(str, primary_values))] = i
     return EmbeddingData(
-        key_to_embed_id=pd.Series(key_to_embed_id, name=table_name),
-        embeddings=[np.asarray(embeddings)],
-        sigma=np.asarray(sigmas, np.float64),
-        alpha=np.asarray(alphas, np.float64)
+        key_to_embed_id=pd.Series({user_key: 0}, name=table_name),
+        embeddings=[np.zeros((1, embedding_size))],
+        sigma=np.zeros((1, embedding_size, embedding_size), dtype=np.float64),
+        alpha=np.zeros((1, ), dtype=np.float64)
     )
 
 

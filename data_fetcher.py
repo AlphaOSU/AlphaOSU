@@ -2,12 +2,13 @@ import json
 import random
 import time
 
+import requests
 from dateutil import parser
 
 import osu_utils
+from train_score_als_db import train_personal_embedding_online
 from data import api
 from data.model import *
-from train_score_als_db import train_personal_embedding_online
 
 
 def ensure_beatmap_star(beatmap_id, ht_star, dt_star):
@@ -419,20 +420,29 @@ def insert_scores(conn, score_db_data):
     repository.insert_or_replace(conn, Score.TABLE_NAME, data, or_ignore=False)
 
 
-def post_process_db():
-    with repository.get_connection() as conn:
+def post_process_db(user_id=None, conn=None):
+    if conn is None:
+        conn = repository.get_connection()
+    with conn:
         # insert game_mode and cs into Score
         repository.ensure_column(conn, Score.TABLE_NAME, [
             (Score.GAME_MODE, "TEXT", None),
             (Score.CS, "INTEGER", None),
             (Score.CUSTOM_ACCURACY, "FLOAT", None),
         ])
+        if user_id is not None:
+            extra_cs = f" WHERE {Score.USER_ID} = {user_id}"
+            extra_update = f" AND {Score.USER_ID} = {user_id}"
+        else:
+            extra_cs = ""
+            extra_update = ""
         repository.execute_sql(conn,
                                f"UPDATE {Score.TABLE_NAME} SET ({Score.GAME_MODE}, {Score.CS}) = "
                                f"(SELECT {Beatmap.GAME_MODE}, {Beatmap.CS} "
                                f"FROM {Beatmap.TABLE_NAME} "
                                f"WHERE {Beatmap.TABLE_NAME}.{Beatmap.ID} == "
-                               f"{Score.TABLE_NAME}.{Score.BEATMAP_ID})")
+                               f"{Score.TABLE_NAME}.{Score.BEATMAP_ID} "
+                               f") {extra_cs}")
         # update custom acc for mania
         weight_mania = {
             Score.COUNT_geki: 320,
@@ -447,7 +457,7 @@ def post_process_db():
         repository.execute_sql(conn,
                                f"UPDATE {Score.TABLE_NAME} "
                                f"SET {Score.CUSTOM_ACCURACY} = ({custom_acc_sum}) * 1.0 / ({custom_acc_total}) / 320 "
-                               f"WHERE {Score.GAME_MODE} == 'mania'")
+                               f"WHERE {Score.GAME_MODE} == 'mania' {extra_update}")
         # drop task table
         repository.execute_sql(conn, f"DROP TABLE IF EXISTS {Task.TABLE_NAME}")
 
@@ -521,9 +531,10 @@ def update_single_user(connection, config: NetworkConfig, user_name=None, user_i
 
         print(f"Fetching scores: ({v['variant']}) ...")
         fetch_best_performance_for_user_online(r['id'], connection)
+        post_process_db(r['id'], connection)
+
         train_personal_embedding_online(config, f"{r['id']}-{game_mode}-{v['variant']}", connection)
     return True
-
 
 if __name__ == "__main__":
     fetch()
