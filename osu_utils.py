@@ -7,16 +7,6 @@ import subprocess
 import json
 
 
-def estimate_star_from_acc(pp, custom_acc, objects):
-    acc_pp = max(5 * custom_acc - 4, 0)
-    if acc_pp == 0:
-        return 0
-    length_pp = 1 + 0.1 * min(1.0, objects / 1500)
-    diff_pp = pp / acc_pp / length_pp / 8.0
-    star = diff_pp ** (1 / 2.2) + 0.15
-    return star
-
-
 def invoke_osu_tools(beatmap_path, dt_star=False, ht_star=False):
     cmd = list(api.get_secret_value("osu_tools_command", []))
     assert len(cmd) > 0
@@ -25,36 +15,12 @@ def invoke_osu_tools(beatmap_path, dt_star=False, ht_star=False):
         cmd.extend(["-m", "DT"])
     elif ht_star:
         cmd.extend(["-m", "HT"])
-    print(f"Invoke osu tools: {cmd}")
     result = json.loads(subprocess.check_output(cmd))
     if dt_star or ht_star:
         return result['results'][0]['attributes']['star_rating']
     return result
 
 
-def estimate_star_from_score(pp, score, objects, od):
-    l = 1 + 0.1 * min(1500, objects) / 1500
-    if score < 500000:
-        return -1
-    elif score < 600000:
-        s = (score - 500000) / 100000 * 0.3
-    elif score < 700000:
-        s = (score - 600000) / 100000 * 0.25 + 0.3
-    elif score < 800000:
-        s = (score - 700000) / 100000 * 0.2 + 0.55
-    elif score < 900000:
-        s = (score - 800000) / 100000 * 0.15 + 0.75
-    else:
-        s = (score - 900000) / 100000 * 0.1 + 0.9
-    a = 0
-    if od != 0 and score > 960000:
-        a = (0.2 - 3 * (10 - od) * 0.006667) * ((score - 960000) / 40000) ** 1.1
-    # print(a, s, l, pp, score, objects, od)
-    diff_pp = pp / 0.8 / (((l * s) ** 1.1 + (l * s * a) ** 1.1) ** (1 / 1.1))
-    return ((diff_pp * 135) ** (1 / 2.2) + 4) / 5 * 0.2
-
-
-# @measure_time
 def mania_pp(score, od, star, objects, power=np.power, where=np.where, abs=np.abs):
     d = power((25 * star - 4), 2.2) / 135
     d = where(star < 0.2, 1 / 135, d)
@@ -248,7 +214,7 @@ def estimate_user_embedding(user_bp: BestPerformance):
     return emb
 
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
     # with repository.get_connection() as conn:
     #     bp = get_user_bp(conn, uid, NetworkConfig())
     #     print(estimate_user_embedding(bp))
@@ -273,4 +239,4 @@ if __name__ == "__main__":
     #
     # print(map_osu_score(1, real_to_train=False))
 
-    print(estimate_star_from_acc(505.91, 0.945932922127987, 10000))
+    # print(estimate_star_from_acc(505.91, 0.945932922127987, 10000))

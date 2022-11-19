@@ -6,6 +6,14 @@ import time
 
 
 def ensure_embedding_column(conn, table_name, embedding_name, config: NetworkConfig):
+    """
+    Ensure the embedding column in the database. Each value in the embedding vector takes a column.
+    :param conn: database connection
+    :param table_name: table name
+    :param embedding_name: base embedding name. The i-th value is saved in {embedding_name}_i
+    :param config: training config
+    :return: nothing
+    """
     columns = [(column, 'REAL', None) for column in
                (config.get_embedding_names(embedding_name) +
                 [config.get_embedding_names(embedding_name, is_alpha=True)])
@@ -16,6 +24,10 @@ def ensure_embedding_column(conn, table_name, embedding_name, config: NetworkCon
 
 
 def seed(source):
+    """
+    seed everything to keep consistency
+    :param source: seed source
+    """
     s = abs(hash(source)) % 2 ** 32
     np.random.seed(s)
     random.seed(s)
@@ -23,6 +35,15 @@ def seed(source):
 
 def load_embedding(table_name, primary_keys, embedding_name, config: NetworkConfig,
                    initializer=None):
+    """
+    load EmbeddingData from database
+    :param table_name: table name
+    :param primary_keys: a list storing the primary key columns
+    :param embedding_name: base embedding column name
+    :param config: training config
+    :param initializer: a function return a value for an embedding value when it is not initialized
+    :return: an EmbeddingData
+    """
     # db key -> emb id
     key_to_embed_id = {}
     if initializer is None:
@@ -169,6 +190,15 @@ def load_beatmap_embedding_online(table_name, primary_keys, embedding_name, conf
 
 def save_embedding(conn, embedding: EmbeddingData, config: NetworkConfig,
                    table_name: str, embedding_name: str):
+    """
+    Save embedding into database. Please use it with load_embedding
+    :param conn: database connection
+    :param embedding: EmbeddingData to be saved
+    :param config: training config
+    :param table_name: table name
+    :param embedding_name: base embedding column name
+    :return: nothing
+    """
     puts = []
     wheres = []
     ensure_embedding_column(conn, table_name, embedding_name, config)
@@ -214,6 +244,11 @@ def save_embedding(conn, embedding: EmbeddingData, config: NetworkConfig,
 
 @measure_time
 def load_weight(config: NetworkConfig):
+    """
+    load weights (i.e., embedding data) from database
+    :param config: training config
+    :return: ScoreModelWeight
+    """
     with repository.get_connection() as connection:
         BeatmapEmbedding.create(connection)
         UserEmbedding.create(connection)
@@ -257,6 +292,11 @@ def load_weight(config: NetworkConfig):
     m = ortho_group.rvs(dim=config.embedding_size)
 
     def mod_embedding_initializer2(primary_values):
+        """
+        An intializer for mod. This is to make the mod embeddings orthogonal
+        :param primary_values: here is the mod name
+        :return: initialization value
+        """
         w = 0.1
         w2 = 0.5
         nm = m[0]

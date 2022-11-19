@@ -370,10 +370,10 @@ class EmbeddingData:
     def __init__(self, key_to_embed_id: pd.Series = None, embeddings: list = None,
                  sigma: np.ndarray = None, alpha: np.ndarray = None):
         """
-        :param key_to_embed_id: {key -> i}, i \in [N]
-        :param embeddings: (1, N, E)
-        :param sigma: (N, (E-1)^2)
-        :param alpha: (N, )
+        :param key_to_embed_id: a mapping {key -> i}, i is the index in embeddings (1 <= i <= N)
+        :param embeddings: shape = (1, N, E)
+        :param sigma: shape = (N, (E-1)^2)
+        :param alpha: shape = (N, )
         """
         self.key_to_embed_id = key_to_embed_id
         self.embeddings = embeddings

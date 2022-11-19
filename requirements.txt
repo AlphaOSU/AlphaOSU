@@ -5,5 +5,4 @@ python_dateutil
 scikit_learn
 scipy
 tqdm
-xgboost
 xlsxwriter

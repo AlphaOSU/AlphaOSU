@@ -51,6 +51,19 @@ speed_to_mod_map = ['HT', 'NM', 'DT']
 
 def get_user_train_data(user_key, weights: ScoreModelWeight,
                         config: NetworkConfig, connection, epoch):
+    """
+    get the training data (scores) for a user from database
+    :param user_key: the target user, in the format of {user_id}-{game_mode}-{variant}
+    :param weights: model weights
+    :param config: training config
+    :param connection: database connection
+    :param epoch: training epoch
+    :return: (scores, beatmap_id_array, mod_id_array, weights)
+        - scores: shape = [N, ]
+        - beatmap_id_array: shape = [N, ], the embedding id of weights.beatmap_embedding
+        - mod_id_array: shape = [N, ], the embedding id of weights.mod_embedding
+        - weights: shape = [N, ], training weight for each data sample.
+    """
     user_id, user_mode, user_variant = user_key.split("-")
     if user_mode != config.game_mode:
         return None
@@ -102,6 +115,19 @@ def get_user_train_data(user_key, weights: ScoreModelWeight,
 
 def get_beatmap_train_data(beatmap_key, weights: ScoreModelWeight,
                            config: NetworkConfig, connection, epoch):
+    """
+    get the training data (scores) for a beatmap from database
+    :param beatmap_key: the target beatmap, in the format of beatmap_id
+    :param weights: model weights
+    :param config: training config
+    :param connection: database connection
+    :param epoch: training epoch
+    :return: (scores, user_id_array, mod_id_array, weights)
+        - scores: shape = [N, ]
+        - user_id_array: shape = [N, ], the embedding id of weights.user_embedding
+        - mod_id_array: shape = [N, ], the embedding id of weights.mod_embedding
+        - weights: shape = [N, ], training weight for each data sample.
+    """
     sql = (
         f"SELECT s.user_id, s.cs, s.speed, s.score, s.{Score.CUSTOM_ACCURACY} "
         f"FROM {Score.TABLE_NAME} as s "
@@ -159,6 +185,20 @@ def get_beatmap_train_data(beatmap_key, weights: ScoreModelWeight,
 
 def get_mod_train_data(mod_key, weights: ScoreModelWeight,
                        config: NetworkConfig, connection, epoch):
+    """
+    get the training data (scores) for a mod from database.
+    WARNING: this may
+    :param mod_key: the target mod. For example, DT.
+    :param weights: model weights
+    :param config: training config
+    :param connection: database connection
+    :param epoch: training epoch
+    :return: (scores, user_id_array, mod_id_array, weights)
+        - scores: shape = [N, ]
+        - user_id_array: shape = [N, ], the embedding id of weights.user_embedding
+        - mod_id_array: shape = [N, ], the embedding id of weights.mod_embedding
+        - weights: shape = [N, ], training weight for each data sample.
+    """
     speed = 0
     if mod_key.startswith("HT"):
         speed = -1
@@ -227,12 +267,31 @@ def mean(arr):
     return sum(arr) / len(arr)
 
 
-def train_embedding(key, get_data_method, weights, config, connection, epoch,
+def train_embedding(key, get_data_method, weights: ScoreModelWeight, config, connection, epoch,
                     embedding_data: EmbeddingData,
                     training_statistics: TrainingStatistics, pbar,
                     other_embedding_data: EmbeddingData,
                     other_embedding_data2: EmbeddingData,
                     cachable=True):
+    """
+    A common method to train embedding (user / beatmap / mod). Traning results will be saved in
+    embedding_data.
+    For example, when training user embedding, other_embedding_data / other_embedding_data2 are
+    the beatmap / mod embedding data. key is the user_key.
+    :param key: target key
+    :param get_data_method: the method to get training data for key
+    :param weights: ScoreModelWeight
+    :param config: training config
+    :param connection: database connection
+    :param epoch: training epoch
+    :param embedding_data: an EmbeddingData to save the embedding for key
+    :param training_statistics: a TrainingStatistics to save the statistics
+    :param pbar: progress bar
+    :param other_embedding_data: an EmbeddingData oppository to embedding_data
+    :param other_embedding_data2: another EmbeddingData oppository to embedding_data
+    :param cachable: can the data returned by get_data_method be cached to save time
+    :return: nothing
+    """
     time_io = time.time()
     global cache
     if key in cache:
@@ -302,7 +361,6 @@ def train_personal_embedding(key, get_data_method, weights, config, connection,
 
 def train_personal_embedding_online(config: NetworkConfig, key, connection):
     user_key = key  # list(weights.user_embedding.key_to_embed_id.keys())[1]
-    # def stability():
 
     weights = data_process.load_weight_online(config, user_key, connection)
     weights.beatmap_embedding.key_to_embed_id = weights.beatmap_embedding.key_to_embed_id.to_dict()
