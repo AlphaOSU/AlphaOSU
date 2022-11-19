@@ -395,6 +395,12 @@ def train_personal_embedding_online(config: NetworkConfig, key, connection):
 
     # save the results
     with connection:
+        primary_keys = ", ".join(UserEmbedding.PRIMARY_KEYS)
+        values = user_key.split("-")
+        sql = (f"INSERT OR IGNORE INTO `{UserEmbedding.TABLE_NAME}` "
+               f"({primary_keys}) "
+               f'VALUES ({values[0]}, "{values[1]}", "{values[2]}")')
+        repository.execute_sql(connection, sql)
         data_process.save_embedding(connection, weights.user_embedding, config,
                                     UserEmbedding.TABLE_NAME,
                                     UserEmbedding.EMBEDDING)
