@@ -467,6 +467,12 @@ def fetch():
         print("ERROR: " + str(api.recent_request))
         raise e
 
+def fetch_best_performance_for_user_online(uid):
+    conn=repository.get_connection()
+    beatmap_db_data, score_db_data = fetch_best_performance_for_user(game_mode='mania', user_id=uid, connection=conn)
+    repository.insert_or_replace(conn, Beatmap.TABLE_NAME, beatmap_db_data)
+    insert_scores(conn, score_db_data)
+    conn.commit()
 
 if __name__ == "__main__":
     fetch()
