@@ -471,5 +471,14 @@ def fetch():
         raise e
 
 
+def fetch_best_performance_for_user_online(uid, connection):
+    beatmap_db_data, score_db_data = fetch_best_performance_for_user(game_mode='mania', user_id=uid,
+                                                                     connection=connection)
+    if beatmap_db_data is None or score_db_data is None:
+        return
+    with connection:
+        repository.insert_or_replace(connection, Beatmap.TABLE_NAME, beatmap_db_data)
+        insert_scores(connection, score_db_data)
+
 if __name__ == "__main__":
     fetch()
