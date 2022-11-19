@@ -101,7 +101,11 @@ def get_access_token():
     return auth_data['token_type'] + ' ' + auth_data['access_token']
 
 
-def request_auth_api(api, method, params):
+def request_auth_api(api, method, params, enable_retry=True):
     access_token = get_access_token()
     header = {'Authorization': access_token}
-    return request_api(api, method, params=params, header=header)
+    if enable_retry:
+        retry_count = 0
+    else:
+        retry_count = 5
+    return request_api(api, method, params=params, header=header, retry_count=retry_count)

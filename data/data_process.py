@@ -100,8 +100,7 @@ def load_user_embedding_online(table_name, primary_keys, embedding_name, config:
     sigmas = []
     alphas = []
     embedding_size = config.embedding_size
-    user_id, game_mode, variant = user_key.split("-")
-    constrain = {'id': user_id, 'game_mode': game_mode, 'variant': variant}
+    constrain = UserEmbedding.construct_where_with_key(user_key)
 
     project = list(primary_keys)
     project += config.get_embedding_names(embedding_name)
@@ -220,18 +219,12 @@ def save_embedding(conn, embedding: EmbeddingData, config: NetworkConfig,
             sigma = embedding.sigma[emb_id]
         puts.append(embedding_array_to_db_dict(weights, embedding_name, alpha, sigma))
         if table_name == BeatmapEmbedding.TABLE_NAME:
-            # beatmap_id, beatmap_speed = key.split("-", 1)
             wheres.append({
                 BeatmapEmbedding.BEATMAP_ID: key
                 # BeatmapEmbedding.SPEED: beatmap_speed
             })
         elif table_name == UserEmbedding.TABLE_NAME:
-            user_id, game_mode, variant = key.split("-")
-            wheres.append({
-                UserEmbedding.USER_ID: user_id,
-                UserEmbedding.GAME_MODE: game_mode,
-                UserEmbedding.VARIANT: variant
-            })
+            wheres.append(UserEmbedding.construct_where_with_key(key))
         elif table_name == ModEmbedding.TABLE_NAME:
             wheres.append({
                 ModEmbedding.MOD: key

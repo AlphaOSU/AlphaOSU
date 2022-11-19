@@ -73,6 +73,11 @@ class UserEmbedding:
             UserEmbedding.VARIANT: variant
         }
 
+    @staticmethod
+    def construct_where_with_key(user_key):
+        user_id, game_mode, variant = user_key.split("-")
+        return UserEmbedding.construct_where(user_id, game_mode, variant)
+
 
 class BeatmapEmbedding:
     TABLE_NAME = "BeatmapEmbedding"

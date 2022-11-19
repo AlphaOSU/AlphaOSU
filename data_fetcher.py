@@ -7,6 +7,7 @@ from dateutil import parser
 import osu_utils
 from data import api
 from data.model import *
+from train_score_als_db import train_personal_embedding_online
 
 
 def ensure_beatmap_star(beatmap_id, ht_star, dt_star):
@@ -31,7 +32,8 @@ def ensure_beatmap_star(beatmap_id, ht_star, dt_star):
     return ht_star, dt_star
 
 
-def parse_beatmap_data(beatmap_data, beatmapset_data, conn: sqlite3.Connection, mode=None, mode_int=None):
+def parse_beatmap_data(beatmap_data, beatmapset_data, conn: sqlite3.Connection, mode=None,
+                       mode_int=None):
     if beatmap_data['status'] != 'ranked':
         return None
     if beatmap_data['convert']:
@@ -212,7 +214,8 @@ def fetch_user_ranking(game_mode, variant, max_page=10000, country=None):
         with conn_ranking:
 
             for user_data in db_data:
-                old = repository.select_first(conn_ranking, User.TABLE_NAME, project=[User.PP, User.DIRTY],
+                old = repository.select_first(conn_ranking, User.TABLE_NAME,
+                                              project=[User.PP, User.DIRTY],
                                               where={
                                                   User.ID: user_data[User.ID],
                                                   User.GAME_MODE: user_data[User.GAME_MODE],
@@ -243,11 +246,11 @@ def fetch_user_ranking(game_mode, variant, max_page=10000, country=None):
                                     conn_ranking)
 
 
-def fetch_best_performance_for_user(game_mode, user_id, connection):
+def fetch_best_performance_for_user(game_mode, user_id, connection, enable_retry=True):
     data = api.request_auth_api("users/%d/scores/best" % user_id, "GET", {
         "mode": game_mode,
         "limit": 100
-    })
+    }, enable_retry=enable_retry)
     if 'error' in data:
         print("ERROR: " + api.recent_request)
         # user does not exist, skip!!
@@ -473,12 +476,54 @@ def fetch():
 
 def fetch_best_performance_for_user_online(uid, connection):
     beatmap_db_data, score_db_data = fetch_best_performance_for_user(game_mode='mania', user_id=uid,
-                                                                     connection=connection)
+                                                                     connection=connection,
+                                                                     enable_retry=False)
     if beatmap_db_data is None or score_db_data is None:
         return
     with connection:
         repository.insert_or_replace(connection, Beatmap.TABLE_NAME, beatmap_db_data)
         insert_scores(connection, score_db_data)
+
+
+def update_single_user(connection, config: NetworkConfig, user_name=None, user_id=None):
+    game_mode = config.game_mode
+    print("Fetching user info...")
+    if user_name is not None:
+        r = api.request_auth_api(f'users/{user_name}/{game_mode}', method='GET', params={
+            "key": "username"
+        }, enable_retry=False)
+    else:
+        r = api.request_auth_api(f'users/{user_id}/{game_mode}', method='GET', params={
+            "key": "id"
+        }, enable_retry=False)
+    if "error" in r:
+        return False
+    user_data = {
+        User.ID: r['id'],
+        User.NAME: r['username'],
+        User.GAME_MODE: game_mode,
+        User.RANK: r['statistics']['global_rank'],
+        User.PLAY_COUNT: r['statistics']['play_count'],
+        User.PLAY_TIME: r['statistics']['play_time'],
+        User.COUNTRY: r['country']['name'],
+        User.DIRTY: False
+    }
+    for v in r['statistics']['variants']:
+        if v['mode'] != game_mode:
+            continue
+        user_variant_data = user_data.copy()
+        user_variant_data[User.VARIANT] = v['variant']
+        user_variant_data[User.PP] = v['pp']
+        if v['pp'] < 100:
+            continue
+        with connection:
+            repository.insert_or_replace(connection, User.TABLE_NAME, [user_variant_data])
+
+        print(f"Fetching scores: ({v['variant']}) ...")
+        fetch_best_performance_for_user_online(r['id'], connection)
+        train_personal_embedding_online(config, f"{r['id']}-{game_mode}-{v['variant']}", connection)
+    return True
+
 
 if __name__ == "__main__":
     fetch()

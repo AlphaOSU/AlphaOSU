@@ -50,7 +50,8 @@ def construct_nearest_neighbor(config: NetworkConfig):
 
 def estimate_pass_probability(uid, variant, beatmap_ids, speed, config: NetworkConfig, connection):
     cur_nbrs_ids, cur_nbrs_distance = repository.select(connection, UserEmbedding.TABLE_NAME,
-                                                        [UserEmbedding.NEIGHBOR_ID, UserEmbedding.NEIGHBOR_DISTANCE],
+                                                        [UserEmbedding.NEIGHBOR_ID,
+                                                         UserEmbedding.NEIGHBOR_DISTANCE],
                                                         where={
                                                             UserEmbedding.USER_ID: uid,
                                                             UserEmbedding.VARIANT: variant,
@@ -66,12 +67,12 @@ def estimate_pass_probability(uid, variant, beatmap_ids, speed, config: NetworkC
 
     with connection:
         cursor = connection.execute(f"SELECT {Score.BEATMAP_ID}, {Score.USER_ID} "
-                              "FROM Score "
-                              f"WHERE Score.user_id IN ({','.join(map(str, cur_nbrs_ids))}) "
-                              f"AND Score.{Score.GAME_MODE} == ? "
-                              f"AND Score.{Score.CS} == ? "
-                              f"AND Score.SPEED == ? ",
-                              [config.game_mode, variant[0], speed])
+                                    "FROM Score "
+                                    f"WHERE Score.user_id IN ({','.join(map(str, cur_nbrs_ids))}) "
+                                    f"AND Score.{Score.GAME_MODE} == ? "
+                                    f"AND Score.{Score.CS} == ? "
+                                    f"AND Score.SPEED == ? ",
+                                    [config.game_mode, variant[0], speed])
         for test_bid, test_uid in cursor:
             if test_bid not in beatmap_id_to_score_index:
                 continue
@@ -89,31 +90,3 @@ def estimate_pass_probability(uid, variant, beatmap_ids, speed, config: NetworkC
 
 if __name__ == "__main__":
     construct_nearest_neighbor(NetworkConfig())
-    print(estimate_pass_probability(7304075, '4k', [
-        767046,  # triumph
-        3525702,  # eternel
-        1920615,  # blue
-        992512, # galaxy
-    ], 1, NetworkConfig()))
-
-    print(estimate_pass_probability(10500832, '4k', [
-        767046,  # triumph
-        3525702,  # eternel
-        1920615,  # blue
-        992512, # galaxy
-    ], 1, NetworkConfig()))
-
-    print(estimate_pass_probability(8611484, '4k', [
-        767046,  # triumph
-        3525702,  # eternel
-        1920615,  # blue
-        992512, # galaxy
-    ], 1, NetworkConfig()))
-
-    print(estimate_pass_probability(26407244, '4k', [
-        767046,  # triumph
-        3525702,  # eternel
-        1920615,  # blue
-        992512, # galaxy
-    ], 1, NetworkConfig()))
-

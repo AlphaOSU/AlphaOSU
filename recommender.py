@@ -4,6 +4,7 @@ from collections import defaultdict
 from scipy import stats, integrate
 
 import osu_utils
+import time
 import train_pass_kernel
 from data.model import *
 
@@ -117,7 +118,6 @@ class PPRecommender:
             f"AND UserEmbedding.{UserEmbedding.GAME_MODE} == '{self.config.game_mode}' "
             f"AND UserEmbedding.{UserEmbedding.VARIANT} == '{variant}' "
         )
-        data_embedding = []
         data = []
         st = time.time()
         for x in cursor:
@@ -125,7 +125,6 @@ class PPRecommender:
             cur_uid, cur_name, cur_pp = x[-3:]
             distance = np.linalg.norm(embedding - cur_embedding)
             data.append([cur_uid, cur_name, cur_pp, distance])
-        data_embedding = np.asarray(data_embedding)
         print(f"similarity: {time.time() - st} s")
 
         data_df = pd.DataFrame(data, columns=["id", "name", "pp", "distance"])

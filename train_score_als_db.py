@@ -2,7 +2,7 @@ import json
 import math
 import time
 
-from sklearn.linear_model import BayesianRidge, LinearRegression
+from sklearn.linear_model import BayesianRidge
 from sklearn.metrics import r2_score, mean_absolute_error
 from tqdm import tqdm
 
@@ -10,9 +10,6 @@ import osu_utils
 from data import data_process
 from data.model import *
 
-
-# score = u^T w b
-# input: x^T w, estimate x
 
 def linear_square(scores, x, weights, epoch, config):
     """
@@ -358,23 +355,54 @@ def train_personal_embedding(key, get_data_method, weights, config, connection,
     embedding_data.sigma[emb_id] = sigma
     embedding_data.alpha[emb_id] = alpha
 
+    return len(scores)
+
 
 def train_personal_embedding_online(config: NetworkConfig, key, connection):
-    user_key = key  # list(weights.user_embedding.key_to_embed_id.keys())[1]
+    user_key = key
 
     weights = data_process.load_weight_online(config, user_key, connection)
     weights.beatmap_embedding.key_to_embed_id = weights.beatmap_embedding.key_to_embed_id.to_dict()
     weights.user_embedding.key_to_embed_id = weights.user_embedding.key_to_embed_id.to_dict()
     weights.mod_embedding.key_to_embed_id = weights.mod_embedding.key_to_embed_id.to_dict()
 
-    train_personal_embedding(user_key, get_user_train_data, weights, config, connection, 200,
-                             weights.user_embedding, weights.beatmap_embedding,
-                             weights.mod_embedding)
+    # train the user embedding
+    count = train_personal_embedding(user_key, get_user_train_data, weights, config, connection, 0,
+                                     weights.user_embedding, weights.beatmap_embedding,
+                                     weights.mod_embedding)
 
-    data_process.save_embedding(connection, weights.user_embedding, config,
-                                UserEmbedding.TABLE_NAME,
-                                UserEmbedding.EMBEDDING)
-    connection.commit()
+    # update neighbors for pass probability estimation
+    constraint = UserEmbedding.construct_where_with_key(user_key)
+    embedding = weights.user_embedding.embeddings[0][weights.user_embedding.key_to_embed_id[user_key]]
+    project = config.get_embedding_names(UserEmbedding.EMBEDDING)
+    cursor = repository.select(connection, UserEmbedding.TABLE_NAME,
+                               project=project + [UserEmbedding.USER_ID],
+                               where={
+                                   UserEmbedding.GAME_MODE: constraint[UserEmbedding.GAME_MODE],
+                                   UserEmbedding.VARIANT: constraint[UserEmbedding.VARIANT]
+                               })
+    data = []
+    for x in cursor:
+        cur_embedding = np.asarray(x[:config.embedding_size])
+        cur_uid = x[-1]
+        distance = np.linalg.norm(embedding - cur_embedding)
+        data.append([cur_uid, distance])
+    data_df = pd.DataFrame(data, columns=["id", "distance"])
+    data_df.sort_values(by=["distance"], ascending=True, inplace=True)
+    data_df = data_df[:150]
+    neighbor_id = data_df['id'].to_numpy().astype(np.int32)
+    neighbor_distance = data_df['distance'].to_numpy()
+
+    # save the results
+    with connection:
+        data_process.save_embedding(connection, weights.user_embedding, config,
+                                    UserEmbedding.TABLE_NAME,
+                                    UserEmbedding.EMBEDDING)
+        repository.update(connection, UserEmbedding.TABLE_NAME, puts=[{
+            UserEmbedding.COUNT: count,
+            UserEmbedding.NEIGHBOR_ID: repository.np_to_db(neighbor_id),
+            UserEmbedding.NEIGHBOR_DISTANCE: repository.np_to_db(neighbor_distance),
+        }], wheres=[constraint])
 
 
 def train_score_by_als(config: NetworkConfig):
@@ -465,9 +493,16 @@ def update_score_count(conn):
     for speed in [-1, 0, 1]:
         mod = ['HT', 'NM', 'DT'][speed + 1]
         repository.execute_sql(conn,
-                               f"UPDATE BeatmapEmbedding SET count_{mod} = (SELECT COUNT(1) FROM Score WHERE Score.beatmap_id == BeatmapEmbedding.id AND Score.speed == {speed})")
+                               f"UPDATE BeatmapEmbedding SET count_{mod} = ("
+                               f"SELECT COUNT(1) FROM Score "
+                               f"WHERE Score.beatmap_id == BeatmapEmbedding.id "
+                               f"AND Score.speed == {speed})")
     repository.execute_sql(conn,
-                           "UPDATE UserEmbedding SET count = (SELECT COUNT(1) FROM Score WHERE Score.user_id == UserEmbedding.id AND Score.game_mode == UserEmbedding.game_mode AND (Score.cs || 'k') == UserEmbedding.variant)")
+                           "UPDATE UserEmbedding SET count = ("
+                           "SELECT COUNT(1) FROM Score "
+                           "WHERE Score.user_id == UserEmbedding.id "
+                           "AND Score.game_mode == UserEmbedding.game_mode "
+                           "AND (Score.cs || 'k') == UserEmbedding.variant)")
     conn.commit()
 
 
