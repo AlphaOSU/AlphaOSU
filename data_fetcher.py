@@ -507,7 +507,8 @@ def update_single_user(connection, config: NetworkConfig, user_name=None, user_i
             "key": "id"
         }, enable_retry=False)
     if "error" in r:
-        return False
+        return False, None
+    user_id = r['id']
     user_data = {
         User.ID: r['id'],
         User.NAME: r['username'],
@@ -524,7 +525,7 @@ def update_single_user(connection, config: NetworkConfig, user_name=None, user_i
         user_variant_data = user_data.copy()
         user_variant_data[User.VARIANT] = v['variant']
         user_variant_data[User.PP] = v['pp']
-        if v['pp'] < 100:
+        if v['pp'] < 10:
             continue
         with connection:
             repository.insert_or_replace(connection, User.TABLE_NAME, [user_variant_data])
@@ -534,7 +535,7 @@ def update_single_user(connection, config: NetworkConfig, user_name=None, user_i
         post_process_db(r['id'], connection)
 
         train_personal_embedding_online(config, f"{r['id']}-{game_mode}-{v['variant']}", connection)
-    return True
+    return True, r['id']
 
 if __name__ == "__main__":
     fetch()

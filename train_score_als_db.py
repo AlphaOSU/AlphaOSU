@@ -47,7 +47,7 @@ speed_to_mod_map = ['HT', 'NM', 'DT']
 
 
 def get_user_train_data(user_key, weights: ScoreModelWeight,
-                        config: NetworkConfig, connection, epoch):
+                        config: NetworkConfig, connection, epoch, ignore_less=True):
     """
     get the training data (scores) for a user from database
     :param user_key: the target user, in the format of {user_id}-{game_mode}-{variant}
@@ -55,6 +55,7 @@ def get_user_train_data(user_key, weights: ScoreModelWeight,
     :param config: training config
     :param connection: database connection
     :param epoch: training epoch
+    :param ignore_too_less: when lacking training data, return None
     :return: (scores, beatmap_id_array, mod_id_array, weights)
         - scores: shape = [N, ]
         - beatmap_id_array: shape = [N, ], the embedding id of weights.beatmap_embedding
@@ -83,6 +84,8 @@ def get_user_train_data(user_key, weights: ScoreModelWeight,
         acc = x[-1]
         if acc < osu_utils.min_acc:
             continue
+        if str(x[0]) not in weights.beatmap_embedding.key_to_embed_id:
+            continue
 
         # scores:
         beatmap_emb_id.append(weights.beatmap_embedding.key_to_embed_id[str(x[0])])
@@ -98,7 +101,9 @@ def get_user_train_data(user_key, weights: ScoreModelWeight,
         scores.append(
             osu_utils.map_osu_acc(acc, real_to_train=True, arctanh=math.atanh, tanh=math.tanh))
         pps.append(x[3])
-    if len(scores) < config.embedding_size:
+    if len(scores) < config.embedding_size and ignore_less:
+        return None
+    if len(scores) == 0:
         return None
     pps = np.asarray(pps)
 
@@ -337,11 +342,13 @@ def train_embedding(key, get_data_method, weights: ScoreModelWeight, config, con
                              f"mse:{mean(training_statistics.mse_list):.4f}")
 
 
-def train_personal_embedding(key, get_data_method, weights, config, connection,
+def train_personal_embedding(key, weights, config, connection,
                              epoch, embedding_data: EmbeddingData,
                              other_embedding_data: EmbeddingData,
                              other_embedding_data2: EmbeddingData):
-    data = get_data_method(key, weights, config, connection, epoch)
+    data = get_user_train_data(key, weights, config, connection, epoch, ignore_less=False)
+    if data is None:
+        return 0
 
     scores, other_emb_id, other_emb_id2, regression_weights = data
     other_embs = other_embedding_data.embeddings[0][other_emb_id]
@@ -367,7 +374,7 @@ def train_personal_embedding_online(config: NetworkConfig, key, connection):
     weights.mod_embedding.key_to_embed_id = weights.mod_embedding.key_to_embed_id.to_dict()
 
     # train the user embedding
-    count = train_personal_embedding(user_key, get_user_train_data, weights, config, connection, 0,
+    count = train_personal_embedding(user_key, weights, config, connection, 0,
                                      weights.user_embedding, weights.beatmap_embedding,
                                      weights.mod_embedding)
 
