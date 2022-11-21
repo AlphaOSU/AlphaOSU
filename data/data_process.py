@@ -91,19 +91,36 @@ def load_embedding(table_name, primary_keys, embedding_name, config: NetworkConf
     )
 
 
-def load_user_embedding_online(table_name, primary_keys, embedding_name, config: NetworkConfig, user_key, connection,
-                               initializer=None):
+def load_user_embedding_online(table_name, config: NetworkConfig, user_key,
+                               ):
+    """
+
+    @param table_name: table UserEmbedding in data.db
+    @param config: training config
+    @param user_key: a key including user_id, game_mode and variant in combination with '-'
+    @return: shape the initial EmbeddingData
+    """
     embedding_size = config.embedding_size
     return EmbeddingData(
         key_to_embed_id=pd.Series({user_key: 0}, name=table_name),
         embeddings=[np.zeros((1, embedding_size))],
         sigma=np.zeros((1, embedding_size, embedding_size), dtype=np.float64),
-        alpha=np.zeros((1, ), dtype=np.float64)
+        alpha=np.zeros((1,), dtype=np.float64)
     )
 
 
 def load_beatmap_embedding_online(table_name, primary_keys, embedding_name, config: NetworkConfig, user_key, connection,
                                   ):
+    """
+
+    @param table_name: table BeatmapEmbedding in data.db
+    @param primary_keys: a list storing the primary key columns
+    @param embedding_name: base embedding column name
+    @param config: training config
+    @param user_key: a key including user_id, game_mode and variant in combination with '-'
+    @param connection: database connection
+    @return: BeatmapEmbeddingData that user have played
+    """
     key_to_embed_id = {}
     embeddings = []
     sigmas = []
@@ -318,9 +335,7 @@ def load_weight(config: NetworkConfig):
 def load_weight_online(config: NetworkConfig, user_key, connection):
     weights = ScoreModelWeight()
     weights.user_embedding = load_user_embedding_online(UserEmbedding.TABLE_NAME,
-                                                        UserEmbedding.PRIMARY_KEYS,
-                                                        UserEmbedding.EMBEDDING,
-                                                        config, user_key, connection)
+                                                        config, user_key)
     weights.beatmap_embedding = load_beatmap_embedding_online(BeatmapEmbedding.TABLE_NAME,
                                                               BeatmapEmbedding.PRIMARY_KEYS,
                                                               BeatmapEmbedding.ITEM_EMBEDDING,
