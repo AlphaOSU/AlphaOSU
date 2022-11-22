@@ -346,6 +346,18 @@ def train_personal_embedding(key, weights, config, connection,
                              epoch, embedding_data: EmbeddingData,
                              other_embedding_data: EmbeddingData,
                              other_embedding_data2: EmbeddingData):
+    """
+    A common method to train user embedding. Training results will be saved in embedding_data.
+    @param key: a key including user_id, game_mode and variant in combination with '-'
+    @param weights: ScoreModelWeight
+    @param config: training config
+    @param connection: database connection
+    @param epoch: training epoch, but it only needs to calculate once because the model had been convergence
+    @param embedding_data: user embedding data
+    @param other_embedding_data: beatmap embedding data
+    @param other_embedding_data2: mod embedding data
+    @return: length of score, for counting how many scores are used for training user embedding
+    """
     data = get_user_train_data(key, weights, config, connection, epoch, ignore_less=False)
     if data is None:
         return 0
@@ -366,6 +378,13 @@ def train_personal_embedding(key, weights, config, connection,
 
 
 def train_personal_embedding_online(config: NetworkConfig, key, connection):
+    """
+    integrate functions among training personal embedding,
+    updating neighbors for pass probability estimation and saving the results
+    @param config: training config
+    @param key: a key including user_id, game_mode and variant in combination with '-'
+    @param connection: database connection
+    """
     user_key = key
 
     weights = data_process.load_weight_online(config, user_key, connection)

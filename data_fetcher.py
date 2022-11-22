@@ -485,6 +485,12 @@ def fetch():
 
 
 def fetch_best_performance_for_user_online(uid, connection):
+    """
+    update table Beatmap and table Score in data according to personal osu bp
+    @param uid: osu id
+    @param connection: database connection
+    @return: nothing
+    """
     beatmap_db_data, score_db_data = fetch_best_performance_for_user(game_mode='mania', user_id=uid,
                                                                      connection=connection,
                                                                      enable_retry=False)

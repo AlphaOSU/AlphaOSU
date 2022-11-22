@@ -94,11 +94,13 @@ def load_embedding(table_name, primary_keys, embedding_name, config: NetworkConf
 def load_user_embedding_online(table_name, config: NetworkConfig, user_key,
                                ):
     """
-
+    shape single UserEmbeddingData
+    Because we make BeatmapEmbedding and ModEmbedding static to calculate UserEmbedding,
+    there is no need to load UserEmbedding.
     @param table_name: table UserEmbedding in data.db
     @param config: training config
     @param user_key: a key including user_id, game_mode and variant in combination with '-'
-    @return: shape the initial EmbeddingData
+    @return: shape the initial UserEmbeddingData
     """
     embedding_size = config.embedding_size
     return EmbeddingData(
@@ -112,8 +114,8 @@ def load_user_embedding_online(table_name, config: NetworkConfig, user_key,
 def load_beatmap_embedding_online(table_name, primary_keys, embedding_name, config: NetworkConfig, user_key, connection,
                                   ):
     """
-
-    @param table_name: table BeatmapEmbedding in data.db
+    load BeatmapEmbeddingData from database
+    @param table_name: table BeatmapEmbedding in data
     @param primary_keys: a list storing the primary key columns
     @param embedding_name: base embedding column name
     @param config: training config
@@ -333,6 +335,13 @@ def load_weight(config: NetworkConfig):
 
 
 def load_weight_online(config: NetworkConfig, user_key, connection):
+    """
+    load personal weights (i.e., embedding data) from database for training personal UserEmbedding
+    @param config: training config
+    @param user_key: a key including user_id, game_mode and variant in combination with '-'
+    @param connection: database connection
+    @return: ScoreModelWeight
+    """
     weights = ScoreModelWeight()
     weights.user_embedding = load_user_embedding_online(UserEmbedding.TABLE_NAME,
                                                         config, user_key)
