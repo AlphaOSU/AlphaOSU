@@ -134,9 +134,6 @@ class PPRecommender:
 
     def map_beatmap_name(self, name, version):
         name = name + " - " + version
-        # max_length = 60
-        # end_length = 20
-        # name = name[:max_length - end_length] + "..." + name[-end_length:] if len(name) > max_length else name
         return name
 
     def recall(self, uid, key_count=[4], beatmap_ids=[], max_star=None, max_size=300, min_star=0,

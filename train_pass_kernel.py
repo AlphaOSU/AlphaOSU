@@ -5,6 +5,13 @@ from data.model import *
 
 
 def construct_nearest_neighbor(config: NetworkConfig):
+    """
+    We estimate the pass probability using k-nearest neighbors. This function constructs Top-k
+    nearest neighbors for each player in the database, which are saved in UserEmbedding.
+    Neighbors in UserEmbedding.
+    @param config: configuration
+    @return: None
+    """
     connection = repository.get_connection()
     weights = data_process.load_weight(config)
     key_to_embed_id: dict = weights.user_embedding.key_to_embed_id.to_dict()
@@ -49,6 +56,17 @@ def construct_nearest_neighbor(config: NetworkConfig):
 
 
 def estimate_pass_probability(uid, variant, beatmap_ids, speed, config: NetworkConfig, connection):
+    """
+    Using k-nearest neighbors algorithm to estimate the pass probability.
+    Should be called after construct_nearest_neighbor()
+    @param uid: user id
+    @param variant: 4k / 7k
+    @param beatmap_ids: beatmap ids that want to calculate
+    @param speed: -1/0/1 = HT/NM/DT
+    @param config: configuration
+    @param connection: db connection
+    @return: probabilities for each beatmap id.
+    """
     cur_nbrs_ids, cur_nbrs_distance = repository.select(connection, UserEmbedding.TABLE_NAME,
                                                         [UserEmbedding.NEIGHBOR_ID,
                                                          UserEmbedding.NEIGHBOR_DISTANCE],

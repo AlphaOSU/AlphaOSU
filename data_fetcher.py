@@ -12,6 +12,13 @@ from data.model import *
 
 
 def ensure_beatmap_star(beatmap_id, ht_star, dt_star):
+    """
+    fetch the star of beatmap with HT or DT mod if it hadn't been fetched
+    @param beatmap_id: the id of beatmap in osu
+    @param ht_star:the star of beatmap with HT mod
+    @param dt_star:the star of beatmap with DT mod
+    @return:ht_star and dt_star
+    """
     if ht_star != 0 and dt_star != 0:
         return ht_star, dt_star
     osu_website = api.get_secret_value("osu_website", api.OSU_WEBSITE)
@@ -35,6 +42,15 @@ def ensure_beatmap_star(beatmap_id, ht_star, dt_star):
 
 def parse_beatmap_data(beatmap_data, beatmapset_data, conn: sqlite3.Connection, mode=None,
                        mode_int=None):
+    """
+    filter useful beatmap data from the original one
+    @param beatmap_data:original beatmap data from osu api
+    @param beatmapset_data:original beatmapset data from osu api
+    @param conn:database connection
+    @param mode:osu game mode
+    @param mode_int:a code name of osu game mode
+    @return:filtered beatmap data as beatmap_db_data
+    """
     if beatmap_data['status'] != 'ranked':
         return None
     if beatmap_data['convert']:
@@ -83,6 +99,13 @@ def parse_beatmap_data(beatmap_data, beatmapset_data, conn: sqlite3.Connection, 
 
 
 def parse_score_data(scores, beatmap_id, is_in_top_scores):
+    """
+    filter useful score data from the original one
+    @param scores:related score data from osu api according to user's bp or top score of beatmap
+    @param beatmap_id:the id of beatmap in osu
+    @param is_in_top_scores:a control parameter
+    @return:filtered score data as score_db_data
+    """
     is_dt = 'DT' in scores['mods'] or 'NC' in scores['mods']
     is_ht = 'HT' in scores['mods']
     result = {
@@ -179,6 +202,13 @@ class ProgressControl:
 
 
 def fetch_user_ranking(game_mode, variant, max_page=10000, country=None):
+    """
+    fetch and save user's ranking in table User
+    @param game_mode: osu game mode
+    @param variant: the number of columns in mania mode
+    @param max_page:the number of fetching ranking range, a page contains 50 users
+    @param country:a parameter for fetching specialized country ranking
+    """
     total_count = 10000
     progress_control = ProgressControl(
         "fetch_user_ranking_%s_%s_%s" % (game_mode, variant, country),
@@ -248,6 +278,14 @@ def fetch_user_ranking(game_mode, variant, max_page=10000, country=None):
 
 
 def fetch_best_performance_for_user(game_mode, user_id, connection, enable_retry=True):
+    """
+    fetch personal specialized data from user's bp
+    @param game_mode: osu game mode
+    @param user_id: osu id
+    @param connection: database connection
+    @param enable_retry:a parameter controlling whether starting retry feature up
+    @return:filtered beatmap data as beatmap_db_data, filtered score data as score_db_data
+    """
     data = api.request_auth_api("users/%d/scores/best" % user_id, "GET", {
         "mode": game_mode,
         "limit": 100
@@ -258,6 +296,11 @@ def fetch_best_performance_for_user(game_mode, user_id, connection, enable_retry
         return None, None
 
     def filter_beatmap(x):
+        """
+        filter convert maps from osu mode
+        @param x:original personal best performance data from osu api
+        @return:bool
+        """
         beatmap = x['beatmap']
         if beatmap['convert']:
             return False
@@ -278,6 +321,11 @@ def fetch_best_performance_for_user(game_mode, user_id, connection, enable_retry
 
 
 def fetch_best_performance(game_mode, max_user=100000):
+    """
+    fetch and save users' bp related data in table Score and table Beatmap
+    @param game_mode:osu game mode
+    @param max_user: the number of fetching user range
+    """
     conn = repository.get_connection()
     with conn:
         user_id_set = set(map(lambda x: x[0], repository.select(
@@ -310,6 +358,11 @@ def fetch_best_performance(game_mode, max_user=100000):
 
 
 def fetch_ranked_beatmaps(mode_int, max_maps=100000):
+    """
+    fetch and save ranked map related data in Table Beatmap
+    @param mode_int:a code name of osu game mode
+    @param max_maps: the number of fetching maps
+    """
     progress_control = ProgressControl("fetch_ranked_beatmaps_%d_auth_2" % (mode_int), max_maps)
     state = json.loads(progress_control.get_state(json.dumps({
         'cur_count': 0,
@@ -346,6 +399,12 @@ def fetch_ranked_beatmaps(mode_int, max_maps=100000):
 
 
 def fetch_beatmap_top_scores(game_mode, variant, max_beatmap=100000):
+    """
+    fetch and save top scores of ranked beatmaps related data in Table Score
+    @param game_mode: osu game mode
+    @param variant: the number of columns in mania mode but CS in osu mode
+    @param max_beatmap: the number of fetching maps
+    """
     connection = repository.get_connection()
     with connection:
         where = {
@@ -402,6 +461,12 @@ def fetch_beatmap_top_scores(game_mode, variant, max_beatmap=100000):
 
 
 def filter_score_data(conn, score_db_data):
+    """
+    make a comparison between previous pp and current pp,then choosing the higher one
+    @param conn:database connection
+    @param score_db_data: filtered score data
+    @return:compared filtered score data
+    """
     data = []
     for score_dict in score_db_data:
         previous_pp = repository.select(conn, Score.TABLE_NAME, project=[Score.PP], where={
@@ -416,11 +481,21 @@ def filter_score_data(conn, score_db_data):
 
 
 def insert_scores(conn, score_db_data):
+    """
+    save filtered score data in Table Score
+    @param conn: database connection
+    @param score_db_data:filtered score data
+    """
     data = filter_score_data(conn, score_db_data)
     repository.insert_or_replace(conn, Score.TABLE_NAME, data, or_ignore=False)
 
 
 def post_process_db(user_id=None, conn=None):
+    """
+    fill up the blanks about Score.GAME_MODE, Score.CS(aka the number of columns in mania mode) and Score.CUSTOM_ACCURACY
+    @param user_id:osu uid
+    @param conn:database connection
+    """
     if conn is None:
         conn = repository.get_connection()
     with conn:
@@ -463,6 +538,9 @@ def post_process_db(user_id=None, conn=None):
 
 
 def fetch():
+    """
+    integrate functions among fetch users' ranking, users' bp, ranked beatmaps and top scores of ranked beatmaps
+    """
     with repository.get_connection() as conn_:
         User.create(conn_)
     Beatmap.create(conn_)
@@ -485,6 +563,12 @@ def fetch():
 
 
 def fetch_best_performance_for_user_online(uid, connection):
+    """
+    update table Beatmap and table Score in data according to personal osu bp
+    @param uid: osu id
+    @param connection: database connection
+    @return: nothing
+    """
     beatmap_db_data, score_db_data = fetch_best_performance_for_user(game_mode='mania', user_id=uid,
                                                                      connection=connection,
                                                                      enable_retry=False)
@@ -496,6 +580,14 @@ def fetch_best_performance_for_user_online(uid, connection):
 
 
 def update_single_user(connection, config: NetworkConfig, user_name=None, user_id=None):
+    """
+    updating personal bp and training personal UserEmbedding
+    @param connection: database connection
+    @param config: training config
+    @param user_name: osu username
+    @param user_id: osu uid
+    @return:a bool to explain whether update user's bp and embedding correctly
+    """
     game_mode = config.game_mode
     print("Fetching user info...")
     if user_name is not None:
@@ -536,6 +628,7 @@ def update_single_user(connection, config: NetworkConfig, user_name=None, user_i
 
         train_personal_embedding_online(config, f"{r['id']}-{game_mode}-{v['variant']}", connection)
     return True, r['id']
+
 
 if __name__ == "__main__":
     fetch()
