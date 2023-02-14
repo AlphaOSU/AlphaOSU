@@ -517,6 +517,11 @@ def train_score_by_als(config: NetworkConfig):
 
 
 def update_score_count(conn):
+    """
+    Update pc for users and beatmaps.
+    @param conn: db connection
+    @return: None
+    """
     print("Update score count")
     repository.ensure_column(conn, UserEmbedding.TABLE_NAME, [("count", "integer", 0)])
     repository.ensure_column(conn, BeatmapEmbedding.TABLE_NAME, [("count_HT", "integer", 0)])

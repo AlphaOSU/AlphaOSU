@@ -629,5 +629,6 @@ def update_single_user(connection, config: NetworkConfig, user_name=None, user_i
         train_personal_embedding_online(config, f"{r['id']}-{game_mode}-{v['variant']}", connection)
     return True, r['id']
 
+
 if __name__ == "__main__":
     fetch()
