@@ -64,9 +64,9 @@ if __name__ == "__main__":
 
         # Third, train the score prediction model.
         register_log_output("train_score")
-        train_score_als_db.train_score_by_als(config)
         with repository.get_connection() as conn:
-            train_score_als_db.update_score_count(conn)
+            train_score_als_db.train_score_by_als(config, conn)
+            train_score_als_db.update_score_count(config, conn)
 
         # Fourth, train the pass model.
         register_log_output("train_pass")

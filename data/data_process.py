@@ -3,7 +3,7 @@ from scipy.stats import ortho_group
 
 from data.model import *
 import random
-import time
+import osu_utils
 
 
 def ensure_embedding_column(conn, table_name, embedding_name, config: NetworkConfig):
@@ -38,18 +38,20 @@ def load_embedding(table_name, primary_keys, embedding_name, config: NetworkConf
                    initializer=None, conn=None):
     """
     load EmbeddingData from database
-    :param table_name: table name
-    :param primary_keys: a list storing the primary key columns
-    :param embedding_name: base embedding column name
-    :param config: training config
-    :param initializer: a function return a value for an embedding value when it is not initialized
-    :return: an EmbeddingData
+    @param table_name: table name
+    @param primary_keys: a list storing the primary key columns
+    @param embedding_name: base embedding column name
+    @param config: training config
+    @param initializer: a function return a value for an embedding value when it is not initialized
+    @param conn: connection
+    @return: an EmbeddingData
     """
     # db key -> emb id
     key_to_embed_id = {}
     if initializer is None:
         def initializer(primary_values):
             arr = (np.random.random((embedding_size,)) + 0.1) * np.sign(np.random.random((embedding_size,)) - 0.5)
+            arr = arr / np.linalg.norm(arr)
             # arr[-1] = 0.5 / embedding_size
             return arr
     embeddings = []
@@ -61,8 +63,6 @@ def load_embedding(table_name, primary_keys, embedding_name, config: NetworkConf
     project += config.get_embedding_names(embedding_name)
     project.append(config.get_embedding_names(embedding_name, is_sigma=True))
     project.append(config.get_embedding_names(embedding_name, is_alpha=True))
-    if conn == None:
-        conn = repository.get_connection()
     with conn:
         ensure_embedding_column(conn, table_name, embedding_name, config)
         cursor = repository.select(conn, table_name=table_name, project=project)
@@ -246,91 +246,82 @@ def load_weight(config: NetworkConfig):
                                                                      ", ".join(
                                                                          BeatmapEmbedding.PRIMARY_KEYS)),
                           where={Beatmap.GAME_MODE: config.game_mode})
-        repository.insert_or_replace(connection, ModEmbedding.TABLE_NAME, [
-            {ModEmbedding.MOD: "NM", ModEmbedding.SPEED: '0', ModEmbedding.IS_ACC: False},
-            {ModEmbedding.MOD: "HT", ModEmbedding.SPEED: '-1', ModEmbedding.IS_ACC: False},
-            {ModEmbedding.MOD: "DT", ModEmbedding.SPEED: '1', ModEmbedding.IS_ACC: False},
-            {ModEmbedding.MOD: "NM-ACC", ModEmbedding.SPEED: '0', ModEmbedding.IS_ACC: True},
-            {ModEmbedding.MOD: "HT-ACC", ModEmbedding.SPEED: '-1', ModEmbedding.IS_ACC: True},
-            {ModEmbedding.MOD: "DT-ACC", ModEmbedding.SPEED: '1', ModEmbedding.IS_ACC: True},
-        ], or_ignore=True)
+        if config.game_mode == 'osu':
+            inserted = []
+            for mod_int, mod_list in osu_utils.STD_MODS.items():
+                inserted.append({
+                    ModEmbedding.MOD: str(mod_int),
+                    ModEmbedding.SPEED: 1 if "DT" in mod_list else 0,
+                    ModEmbedding.IS_ACC: False,
+                    ModEmbedding.MOD_TEXT: ",".join(mod_list)
+                })
+            repository.insert_or_replace(connection, ModEmbedding.TABLE_NAME, inserted, or_ignore=True)
+        elif config.game_mode == 'mania':
+            repository.insert_or_replace(connection, ModEmbedding.TABLE_NAME, [
+                {ModEmbedding.MOD: "NM", ModEmbedding.SPEED: '0', ModEmbedding.IS_ACC: False},
+                {ModEmbedding.MOD: "HT", ModEmbedding.SPEED: '-1', ModEmbedding.IS_ACC: False},
+                {ModEmbedding.MOD: "DT", ModEmbedding.SPEED: '1', ModEmbedding.IS_ACC: False},
+                {ModEmbedding.MOD: "NM-ACC", ModEmbedding.SPEED: '0', ModEmbedding.IS_ACC: True},
+                {ModEmbedding.MOD: "HT-ACC", ModEmbedding.SPEED: '-1', ModEmbedding.IS_ACC: True},
+                {ModEmbedding.MOD: "DT-ACC", ModEmbedding.SPEED: '1', ModEmbedding.IS_ACC: True},
+            ], or_ignore=True)
 
-    # load embedding weights
-    weights = ScoreModelWeight()
-    # if os.path.exists(SCORE_WEIGHT_PATH):
-    #     with open(SCORE_WEIGHT_PATH, "rb") as f:
-    #         feature_weights = pickle.load(f)
-    #         print("[load_weight] old weight keys: " + str(feature_weights.keys()))
-    #         weights.feature_weights = feature_weights
+        # load embedding weights
+        weights = ScoreModelWeight()
+        weights.user_embedding = load_embedding(UserEmbedding.TABLE_NAME, UserEmbedding.PRIMARY_KEYS,
+                                                UserEmbedding.EMBEDDING, config, conn=connection)
+        weights.beatmap_embedding = load_embedding(BeatmapEmbedding.TABLE_NAME,
+                                                   BeatmapEmbedding.PRIMARY_KEYS,
+                                                   BeatmapEmbedding.ITEM_EMBEDDING,
+                                                   config, conn=connection)
 
-    weights.user_embedding = load_embedding(UserEmbedding.TABLE_NAME, UserEmbedding.PRIMARY_KEYS,
-                                            UserEmbedding.EMBEDDING, config)
-    weights.beatmap_embedding = load_embedding(BeatmapEmbedding.TABLE_NAME,
-                                               BeatmapEmbedding.PRIMARY_KEYS,
-                                               BeatmapEmbedding.ITEM_EMBEDDING,
-                                               config)
+        m = ortho_group.rvs(dim=config.embedding_size)
 
-    m = ortho_group.rvs(dim=config.embedding_size)
+        def mod_embedding_initializer_mania(primary_values):
+            """
+            An intializer for mod. This is to make the mod embeddings orthogonal
+            :param primary_values: here is the mod name
+            :return: initialization value
+            """
+            w = 0.1
+            w2 = 0.5
+            nm = m[0]
+            ht = m[1] * (1 - w) + nm * w
+            dt = m[2] * (1 - w) + nm * w
+            nm_acc = m[3] * (1 - w2) + nm * w2
+            ht_acc = m[4] * (1 - w2 - w) + ht * w2 + nm_acc * w
+            dt_acc = m[5] * (1 - w2 - w) + dt * w2 + nm_acc * w
+            if primary_values[0] == 'NM':
+                return nm
+            elif primary_values[0] == 'HT':
+                return ht
+            elif primary_values[0] == 'DT':
+                return dt
+            elif primary_values[0] == 'NM-ACC':
+                return nm_acc
+            elif primary_values[0] == 'HT-ACC':
+                return ht_acc
+            elif primary_values[0] == 'DT-ACC':
+                return dt_acc
+            raise
 
-    def mod_embedding_initializer2(primary_values):
-        """
-        An intializer for mod. This is to make the mod embeddings orthogonal
-        :param primary_values: here is the mod name
-        :return: initialization value
-        """
-        w = 0.1
-        w2 = 0.5
-        nm = m[0]
-        ht = m[1] * (1 - w) + nm * w
-        dt = m[2] * (1 - w) + nm * w
-        nm_acc = m[3] * (1 - w2) + nm * w2
-        ht_acc = m[4] * (1 - w2 - w) + ht * w2 + nm_acc * w
-        dt_acc = m[5] * (1 - w2 - w) + dt * w2 + nm_acc * w
-        if primary_values[0] == 'NM':
-            return nm
-        elif primary_values[0] == 'HT':
-            return ht
-        elif primary_values[0] == 'DT':
-            return dt
-        elif primary_values[0] == 'NM-ACC':
-            return nm_acc
-        elif primary_values[0] == 'HT-ACC':
-            return ht_acc
-        elif primary_values[0] == 'DT-ACC':
-            return dt_acc
-        raise
 
-    weights.mod_embedding = load_embedding(ModEmbedding.TABLE_NAME,
-                                           ModEmbedding.PRIMARY_KEYS,
-                                           ModEmbedding.EMBEDDING, config,
-                                           mod_embedding_initializer2)
-    # print("mod corr: ")
-    # def cos_sim(a, b):
-    #     return np.dot(a, b) / (np.linalg.norm(a) + 1e-6) / (np.linalg.norm(b) + 1e-6)
-    # for idx_i, i in enumerate(weights.mod_embedding.key_to_embed_id.keys()):
-    #     for idx_j, j in enumerate(weights.mod_embedding.key_to_embed_id.keys()):
-    #         if idx_i <= idx_j:
-    #             continue
-    #         ii = weights.mod_embedding.key_to_embed_id[i]
-    #         jj = weights.mod_embedding.key_to_embed_id[j]
-    #         sim = cos_sim(weights.mod_embedding.embeddings[0][ii], weights.mod_embedding.embeddings[0][jj])
-    #         print(f"{i} <-> {j}: {sim}")
+        def mod_embedding_initializer_std(primary_values):
+            keys = list(osu_utils.STD_MODS.keys())
+            return m[keys.index(primary_values[0])]
 
-    # mod_embedding = np.zeros((3, config.embedding_size, config.embedding_size), dtype=np.float64)
-    # for i in range(3):
-    #     for j in range(config.embedding_size // 3):
-    #         mod_embedding[i, i + j, i + j]
-    # mod_embedding[0, ]
-    # weights.mod_embedding = EmbeddingData(
-    #     key_to_embed_id=pd.Series({'HT': 0, 'NM': 1, 'DT': 2}),
-    #     embeddings=[np.asarray([
-    #         [1, 1, 1, 0, 0, 0, 0, 0, 0, 0],
-    #         [0, 0, 0, 1, 1, 1, 1, 0, 0, 0],
-    #         [0, 0, 0, 0, 0, 0, 0, 1, 1, 1]
-    #     ], dtype=np.float64)],
-    #     sigma=np.zeros((3, config.embedding_size, config.embedding_size), np.float64),
-    #     alpha=np.zeros((3,), np.float64),
-    # )
+        if config.game_mode == 'mania':
+            mod_embedding_initializer = mod_embedding_initializer_mania
+        elif config.game_mode == 'osu':
+            mod_embedding_initializer = mod_embedding_initializer_std
+        else:
+            raise
+
+        weights.mod_embedding = load_embedding(ModEmbedding.TABLE_NAME,
+                                               ModEmbedding.PRIMARY_KEYS,
+                                               ModEmbedding.EMBEDDING, config,
+                                               mod_embedding_initializer, conn=connection)
+
     return weights
 
 

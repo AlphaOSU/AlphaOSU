@@ -81,6 +81,8 @@ max_score = 1_000_000
 min_score = 500_000
 max_acc = 1
 min_acc = 0.8
+max_pp_ratio = 1
+min_pp_ratio = 0
 
 k_score = (2 - 2 * ep) / (max_score - min_score)
 b_score = -k_score * min_score - 1 + ep
@@ -88,6 +90,8 @@ b_score = -k_score * min_score - 1 + ep
 k_acc = (2 - 2 * ep) / (max_acc - min_acc)
 b_acc = -k_acc * min_acc - 1 + ep
 
+k_pp = (2 - 2 * ep) / (max_pp_ratio - min_pp_ratio)
+b_pp = -k_pp * min_pp_ratio - 1 + ep
 
 def map_osu_score(score, real_to_train: bool, arctanh=np.arctanh, tanh=np.tanh):
     """
@@ -105,6 +109,13 @@ def map_osu_score(score, real_to_train: bool, arctanh=np.arctanh, tanh=np.tanh):
         return np.clip((tanh(score) - b_score) / k_score, min_score, max_score)
 
 
+def map_osu_pp(pp, real_to_train: bool, max_pp: float, arctanh=np.arctanh, tanh=np.tanh):
+    global k_pp, b_pp, min_pp_ratio, max_pp_ratio
+    if real_to_train:
+        return arctanh(k_pp * np.clip(pp / max_pp, min_pp_ratio, max_pp_ratio) + b_pp)
+    else:
+        return np.clip((tanh(pp) - b_pp) / k_pp, min_pp_ratio, max_pp_ratio) * max_pp
+
 def map_osu_acc(acc, real_to_train: bool, arctanh=np.arctanh, tanh=np.tanh):
     """
     Scale acc to [-1, 1] for stable training.
@@ -120,6 +131,35 @@ def map_osu_acc(acc, real_to_train: bool, arctanh=np.arctanh, tanh=np.tanh):
     else:
         return np.clip((tanh(acc) - b_acc) / k_acc, min_acc, max_acc)
 
+
+MOD_INT_MAPPING = {
+    'NM': 0,
+    'DT': 64,
+    'HD': 8,
+    'HR': 16,
+    'HT': 256
+}
+
+def mods_to_db_key(mods):
+    if mods is None or len(mods) == 0:
+        return "0"
+    return str(sum(MOD_INT_MAPPING.get(m, 0) for m in mods))
+
+
+def bools_to_db_key(is_dt, is_hr, is_hd):
+    mod_int = 0
+    if is_dt:
+        mod_int += MOD_INT_MAPPING["DT"]
+    if is_hr:
+        mod_int += MOD_INT_MAPPING["HR"]
+    if is_hd:
+        mod_int += MOD_INT_MAPPING["HD"]
+    return str(mod_int)
+
+STD_MODS = dict(
+    (mods_to_db_key(x), x) for x in
+    [['NM'], ['HD'], ['HR'], ['DT'], ['HD', 'HR'], ['HD', 'DT'], ['HR', 'DT'], ['HR', 'HD', 'DT']]
+)
 
 def predict_score_std(connection, uid, variant, config: NetworkConfig, bid, mod):
     """
@@ -240,25 +280,45 @@ def get_user_bp(connection, user_id,
     @param is_acc: fetch score or acc
     @return: BestPerformance
     """
-    if is_acc:
-        score = Score.CUSTOM_ACCURACY
+    if config.game_mode == 'mania':
+        if is_acc:
+            score = Score.CUSTOM_ACCURACY
+        else:
+            score = Score.SCORE
+        sql = (f"SELECT Beatmap.id, Score.speed, Score.PP, Score.{score}, Score.{Score.SCORE_ID}, Beatmap.{Beatmap.HT_STAR}, "
+                f"Beatmap.{Beatmap.STAR}, Beatmap.{Beatmap.DT_STAR}, Beatmap.{Beatmap.CS} "
+                f"FROM Score "
+                f"JOIN Beatmap ON Score.beatmap_id == Beatmap.id "
+                f'WHERE Score.user_id == "{user_id}" ' 
+                f'AND Beatmap.game_mode == "{config.game_mode}" '
+                f"ORDER BY Score.pp DESC ")
+        if max_length is not None:
+            sql += f"LIMIT {max_length + 30}"
+        cursor = list(repository.execute_sql(connection, sql).fetchall())
+        user_bp = BestPerformance(max_length)
+        for tuple in cursor[::-1]:
+            bid, speed, pp, score, score_id, ht_star, nm_star, dt_star, cs = tuple
+            star = [ht_star, nm_star, dt_star][speed + 1]
+            user_bp.update(int(bid), int(speed), score, pp, star, score_id=score_id,
+                           cs=cs)  # , embeddings)
+        return user_bp
+    elif config.game_mode == 'osu':
+        sql = (f"SELECT Beatmap.id, Score.PP, Score.{Score.SCORE_ID}, Beatmap.{Beatmap.MOD_STAR}, "
+                f"Score.{Score.IS_DT}, Score.{Score.IS_HD}, Score.{Score.IS_HR} "
+                f"FROM Score "
+                f"JOIN Beatmap ON Score.beatmap_id == Beatmap.id "
+                f'WHERE Score.user_id == "{user_id}" ' 
+                f'AND Beatmap.game_mode == "{config.game_mode}" '
+                f"ORDER BY Score.pp DESC ")
+        if max_length is not None:
+            sql += f"LIMIT {max_length + 30}"
+        cursor = list(repository.execute_sql(connection, sql).fetchall())
+        user_bp = BestPerformance(max_length)
+        for tuple in cursor[::-1]:
+            bid, pp, score_id, mod_star, is_dt, is_hd, is_hr = tuple
+            mod_int = bools_to_db_key(is_dt, is_hr, is_hd)
+            star = json.loads(mod_star)[mod_int]
+            user_bp.update(int(bid), mod_int, pp, pp, star, score_id=score_id)  # , embeddings)
+        return user_bp
     else:
-        score = Score.SCORE
-    sql = f"""SELECT Beatmap.id, Score.speed, Score.PP, Score.{score}, Score.{Score.SCORE_ID}, Beatmap.{Beatmap.HT_STAR}, 
-Beatmap.{Beatmap.STAR}, Beatmap.{Beatmap.DT_STAR}, Beatmap.{Beatmap.CS}
-FROM Score
-JOIN Beatmap ON Score.beatmap_id == Beatmap.id
-WHERE Score.user_id == "{user_id}" 
-AND Beatmap.game_mode == "{config.game_mode}"
-ORDER BY Score.pp DESC
-"""
-    if max_length is not None:
-        sql += f"LIMIT {max_length + 30}"
-    cursor = list(repository.execute_sql(connection, sql).fetchall())
-    user_bp = BestPerformance(max_length)
-    for tuple in cursor[::-1]:
-        bid, speed, pp, score, score_id, ht_star, nm_star, dt_star, cs = tuple
-        star = [ht_star, nm_star, dt_star][speed + 1]
-        user_bp.update(int(bid), int(speed), score, pp, star, score_id=score_id,
-                       cs=cs)  # , embeddings)
-    return user_bp
+        raise NotImplemented
