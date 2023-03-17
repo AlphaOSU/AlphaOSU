@@ -20,6 +20,10 @@ class STDScoreDataProvider(BaseScoreDataProvider):
             max_pp = json.loads(max_pp)
             self.beatmap_max_pp[bid] = max_pp
 
+        # filter user/beatmap that have a low count
+        self.dirty_user = set()
+        self.dirty_beatmap = set()
+
     def get_mod_int(self, is_dt, is_hr, is_hd):
         mod_int = 0
         if is_dt:
@@ -54,8 +58,9 @@ class STDScoreDataProvider(BaseScoreDataProvider):
 
             if str(bid) not in self.weights.beatmap_embedding.key_to_embed_id:
                 continue
-            bid_emb = self.weights.beatmap_embedding.key_to_embed_id[str(x[0])]
-
+            if int(bid) in self.dirty_beatmap:
+                continue
+            bid_emb = self.weights.beatmap_embedding.key_to_embed_id[str(bid)]
 
             beatmap_emb_id.append(bid_emb)
             mod_emb_id.append(
@@ -64,8 +69,10 @@ class STDScoreDataProvider(BaseScoreDataProvider):
             pps.append(pp)
 
         if len(pps) < self.config.embedding_size and ignore_less:
+            self.dirty_user.add(int(user_id))
             return None
         if len(pps) == 0:
+            self.dirty_user.add(int(user_id))
             return None
         pps = np.asarray(pps)
 
@@ -101,6 +108,8 @@ class STDScoreDataProvider(BaseScoreDataProvider):
             user_key = f"{uid}-{self.config.game_mode}-"
             if user_key not in self.weights.user_embedding.key_to_embed_id:
                 continue
+            if int(uid) in self.dirty_user:
+                continue
 
             user_emb_id.append(self.weights.user_embedding.key_to_embed_id[user_key])
             mod_emb_id.append(
@@ -109,6 +118,7 @@ class STDScoreDataProvider(BaseScoreDataProvider):
             pps.append(pp)
 
         if len(pps) < self.config.embedding_size:
+            self.dirty_beatmap.add(int(beatmap_key))
             return None
         return (np.asarray(pps, dtype=np.float32),
                 np.asarray(user_emb_id, dtype=np.int32),

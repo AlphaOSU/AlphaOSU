@@ -52,7 +52,8 @@ def register_log_output(name):
 
 
 if __name__ == "__main__":
-    config = NetworkConfig()
+    config_path = sys.argv[-1]
+    config = NetworkConfig.from_config(config_path)
 
     try:
         # First, remove the log dir
@@ -60,7 +61,10 @@ if __name__ == "__main__":
 
         # Second, fetch data
         register_log_output("data_fetch")
-        data_fetcher.fetch()
+        if config.game_mode == 'osu':
+            data_fetcher.fetch_std()
+        elif config.game_mode == 'mania':
+            data_fetcher.fetch_mania()
 
         # Third, train the score prediction model.
         register_log_output("train_score")

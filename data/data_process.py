@@ -27,7 +27,7 @@ def ensure_embedding_column(conn, table_name, embedding_name, config: NetworkCon
 def seed(source):
     """
     seed everything to keep consistency
-    :param source: seed source
+    @param source: seed source
     """
     s = abs(hash(source)) % 2 ** 32
     np.random.seed(s)
@@ -51,7 +51,7 @@ def load_embedding(table_name, primary_keys, embedding_name, config: NetworkConf
     if initializer is None:
         def initializer(primary_values):
             arr = (np.random.random((embedding_size,)) + 0.1) * np.sign(np.random.random((embedding_size,)) - 0.5)
-            arr = arr / np.linalg.norm(arr)
+            # arr = arr / np.linalg.norm(arr)
             # arr[-1] = 0.5 / embedding_size
             return arr
     embeddings = []
@@ -111,8 +111,8 @@ def load_user_embedding_online(table_name, config: NetworkConfig, user_key,
     )
 
 
-def load_beatmap_embedding_online(table_name, primary_keys, embedding_name, config: NetworkConfig, user_key, connection,
-                                  ):
+def load_beatmap_embedding_online(table_name, primary_keys, embedding_name, config: NetworkConfig,
+                                  user_key, connection):
     """
     load BeatmapEmbeddingData from database
     @param table_name: table BeatmapEmbedding in data
@@ -134,15 +134,27 @@ def load_beatmap_embedding_online(table_name, primary_keys, embedding_name, conf
     project += config.get_embedding_names(embedding_name)
     project.append(config.get_embedding_names(embedding_name, is_sigma=True))
     project.append(config.get_embedding_names(embedding_name, is_alpha=True))
+    project.append(f"{BeatmapEmbedding.COUNT_DT} + {BeatmapEmbedding.COUNT_NM} + {BeatmapEmbedding.COUNT_HT}")
 
-    sql = (
-        f"SELECT s.{Score.BEATMAP_ID} "
-        f"FROM {Score.TABLE_NAME} as s "
-        f"WHERE s.{Score.GAME_MODE} == '{game_mode}' "
-        f"AND s.{Score.USER_ID} == {user_id} "
-        f"AND s.cs == '{variant[0]}' "
-        f"AND s.{Score.PP} >= 1 "
-        f"AND NOT s.{Score.IS_EZ} ")
+    if config.game_mode == 'mania':
+        sql = (
+            f"SELECT DISTINCT s.{Score.BEATMAP_ID} "
+            f"FROM {Score.TABLE_NAME} as s "
+            f"WHERE s.{Score.GAME_MODE} == '{game_mode}' "
+            f"AND s.{Score.USER_ID} == {user_id} "
+            f"AND s.cs == '{variant[0]}' "
+            f"AND s.{Score.PP} >= 1 "
+            f"AND NOT s.{Score.IS_EZ} ")
+    elif config.game_mode == 'osu':
+        sql = (
+            f"SELECT DISTINCT {Score.BEATMAP_ID} "
+            f"FROM {Score.TABLE_NAME} "
+            f"WHERE {Score.GAME_MODE} == '{game_mode}' "
+            f"AND {Score.USER_ID} == {user_id} "
+            f"AND {Score.PP} >= 1 "
+            f"AND NOT {Score.IS_EZ} AND NOT {Score.IS_FL} AND NOT {Score.IS_HT}")
+    else:
+        raise
 
     for k, x in enumerate(repository.execute_sql(connection, sql)):
         beatmap_id = int(''.join(map(str, x)))
@@ -153,9 +165,11 @@ def load_beatmap_embedding_online(table_name, primary_keys, embedding_name, conf
             primary_values = tpl[:len(primary_keys)]
             seed(tuple(primary_values))
             embedding = list(tpl[len(primary_keys):len(primary_keys) + embedding_size])
-            sigma = repository.db_to_np(tpl[-2])
-            alpha = tpl[-1]
-
+            sigma = repository.db_to_np(tpl[-3])
+            alpha = tpl[-2]
+            count = tpl[-1]
+            if count < config.embedding_size:
+                break
             if embedding[0] is None:
                 break
             if str(beatmap_id) in key_to_embed_id.keys():
@@ -307,8 +321,16 @@ def load_weight(config: NetworkConfig):
 
 
         def mod_embedding_initializer_std(primary_values):
-            keys = list(osu_utils.STD_MODS.keys())
-            return m[keys.index(primary_values[0])]
+            cur_mod_int = int(primary_values[0])
+            if cur_mod_int & osu_utils.MOD_INT_MAPPING["DT"] != 0:
+                v = m[0]
+            else:
+                v = m[1]
+            if cur_mod_int & osu_utils.MOD_INT_MAPPING["HR"] != 0:
+                v = v * 0.5 + m[2] * 0.5
+            if cur_mod_int & osu_utils.MOD_INT_MAPPING["HD"] != 0:
+                v = v * 0.7 + m[3] * 0.3
+            return v
 
         if config.game_mode == 'mania':
             mod_embedding_initializer = mod_embedding_initializer_mania

@@ -1,9 +1,7 @@
-import functools
-import json
-import math
 import time
+import pickle
 
-from sklearn.linear_model import BayesianRidge, LinearRegression
+from sklearn.linear_model import BayesianRidge
 from sklearn.metrics import r2_score, mean_absolute_error
 from tqdm import tqdm
 
@@ -158,9 +156,13 @@ def train_personal_embedding(key, weights, config, connection,
     @param other_embedding_data2: mod embedding data
     @return: length of score, for counting how many scores are used for training user embedding
     """
-    # TODO: std
-    data = ManiaScoreDataProvider(weights, config, connection).provide_user_data(key, epoch,
-                                                                                 ignore_less=False)
+    if config.game_mode == 'osu':
+        provider = STDScoreDataProvider(weights, config, connection)
+    elif config.game_mode == 'mania':
+        provider = ManiaScoreDataProvider(weights, config, connection)
+    else:
+        raise
+    data = provider.provide_user_data(key, epoch, ignore_less=False)
     if data is None:
         return 0
 
@@ -193,6 +195,7 @@ def train_personal_embedding_online(config: NetworkConfig, key, connection):
     weights.beatmap_embedding.key_to_embed_id = weights.beatmap_embedding.key_to_embed_id.to_dict()
     weights.user_embedding.key_to_embed_id = weights.user_embedding.key_to_embed_id.to_dict()
     weights.mod_embedding.key_to_embed_id = weights.mod_embedding.key_to_embed_id.to_dict()
+    constraint = UserEmbedding.construct_where_with_key(user_key)
 
     # train the user embedding
     count = train_personal_embedding(user_key, weights, config, connection, 100,
@@ -200,27 +203,52 @@ def train_personal_embedding_online(config: NetworkConfig, key, connection):
                                      weights.mod_embedding)
 
     # update neighbors for pass probability estimation
-    constraint = UserEmbedding.construct_where_with_key(user_key)
-    embedding = weights.user_embedding.embeddings[0][
-        weights.user_embedding.key_to_embed_id[user_key]]
-    project = config.get_embedding_names(UserEmbedding.EMBEDDING)
-    cursor = repository.select(connection, UserEmbedding.TABLE_NAME,
-                               project=project + [UserEmbedding.USER_ID],
-                               where={
-                                   UserEmbedding.GAME_MODE: constraint[UserEmbedding.GAME_MODE],
-                                   UserEmbedding.VARIANT: constraint[UserEmbedding.VARIANT]
-                               })
-    data = []
-    for x in cursor:
-        cur_embedding = np.asarray(x[:config.embedding_size])
-        cur_uid = x[-1]
-        distance = np.linalg.norm(embedding - cur_embedding)
-        data.append([cur_uid, distance])
-    data_df = pd.DataFrame(data, columns=["id", "distance"])
-    data_df.sort_values(by=["distance"], ascending=True, inplace=True)
-    data_df = data_df[:150]
-    neighbor_id = data_df['id'].to_numpy().astype(np.int32)
-    neighbor_distance = data_df['distance'].to_numpy()
+    if os.path.isfile(config.ball_tree_path):
+        embedding = weights.user_embedding.embeddings[0][
+            weights.user_embedding.key_to_embed_id[user_key]
+        ]
+        embedding = np.reshape(embedding, (1, -1))
+        with open(config.ball_tree_path, 'rb') as f:
+            nbrs, user_ids, first_variant = pickle.load(f)
+
+        if first_variant != user_key.split("-")[-1]:
+            # trick: add a large value to the first dimension if variant is different
+            embedding[0, 0] += 50
+
+        nbrs_distance, nbrs_index = nbrs.kneighbors(embedding)
+
+        neighbor_id = user_ids[nbrs_index[0]].tolist()
+        neighbor_id.insert(0, user_key.split("-")[0])
+        neighbor_id = np.asarray(neighbor_id, dtype=np.int32)
+
+        neighbor_distance = nbrs_distance[0].tolist()
+        neighbor_distance.insert(0, 0.0)
+        neighbor_distance = np.asarray(neighbor_distance, dtype=np.float64)
+
+    else:
+        #TODO: Compat codes. Remove it in the future
+        print("WARNING: ball tree path not exists. Fall back to brute force!")
+
+        embedding = weights.user_embedding.embeddings[0][
+            weights.user_embedding.key_to_embed_id[user_key]]
+        project = config.get_embedding_names(UserEmbedding.EMBEDDING)
+        cursor = repository.select(connection, UserEmbedding.TABLE_NAME,
+                                   project=project + [UserEmbedding.USER_ID],
+                                   where={
+                                       UserEmbedding.GAME_MODE: constraint[UserEmbedding.GAME_MODE],
+                                       UserEmbedding.VARIANT: constraint[UserEmbedding.VARIANT]
+                                   })
+        data = []
+        for x in cursor:
+            cur_embedding = np.asarray(x[:config.embedding_size])
+            cur_uid = x[-1]
+            distance = np.linalg.norm(embedding - cur_embedding)
+            data.append([cur_uid, distance])
+        data_df = pd.DataFrame(data, columns=["id", "distance"])
+        data_df.sort_values(by=["distance"], ascending=True, inplace=True)
+        data_df = data_df[:150]
+        neighbor_id = data_df['id'].to_numpy().astype(np.int32)
+        neighbor_distance = data_df['distance'].to_numpy()
 
     # save the results
     with connection:
@@ -239,6 +267,21 @@ def train_personal_embedding_online(config: NetworkConfig, key, connection):
             UserEmbedding.NEIGHBOR_DISTANCE: repository.np_to_db(neighbor_distance),
         }], wheres=[constraint])
 
+def debug_mod_embedding(mod_embedding: EmbeddingData):
+    def cos_sim(a, b):
+        return np.dot(a, b) / (np.linalg.norm(a) + 1e-6) / (np.linalg.norm(b) + 1e-6)
+    for idx_i, i in enumerate(mod_embedding.key_to_embed_id.keys()):
+        for idx_j, j in enumerate(mod_embedding.key_to_embed_id.keys()):
+            if idx_i <= idx_j:
+                continue
+            ii = mod_embedding.key_to_embed_id[i]
+            jj = mod_embedding.key_to_embed_id[j]
+            sim = cos_sim(mod_embedding.embeddings[0][ii],
+                          mod_embedding.embeddings[0][jj])
+            mod_i = "".join(osu_utils.STD_MODS[str(i)])
+            mod_j = "".join(osu_utils.STD_MODS[str(j)])
+            print(f"{mod_i} <-> {mod_j}: {sim:.5f}  ", end="")
+        print()
 
 def train_score_by_als(config: NetworkConfig, connection: sqlite3.Connection):
 
@@ -272,6 +315,8 @@ def train_score_by_als(config: NetworkConfig, connection: sqlite3.Connection):
     def provide_mod_data(k, e):
         return provider.provide_mod_data(k, e)
 
+    debug_mod_embedding(weights.mod_embedding)
+
     for epoch in range(200):
 
         # train beatmap
@@ -282,6 +327,7 @@ def train_score_by_als(config: NetworkConfig, connection: sqlite3.Connection):
                             weights.beatmap_embedding, statistics, pbar, weights.user_embedding,
                             weights.mod_embedding)
         tqdm.write(pbar.desc)
+        print(len(provider.dirty_beatmap))
 
         # train user
         statistics = TrainingStatistics("user", len(weights.user_embedding.key_to_embed_id))
@@ -291,6 +337,7 @@ def train_score_by_als(config: NetworkConfig, connection: sqlite3.Connection):
                             weights.user_embedding, statistics, pbar, weights.beatmap_embedding,
                             weights.mod_embedding)
         tqdm.write(pbar.desc)
+        print(len(provider.dirty_user))
 
         cur_r2 = mean(statistics.r2_adj_list)
         if previous_r2 >= cur_r2:
@@ -319,20 +366,7 @@ def train_score_by_als(config: NetworkConfig, connection: sqlite3.Connection):
                                 weights.beatmap_embedding, cachable=False)
             tqdm.write(pbar.desc)
 
-            # def cos_sim(a, b):
-            #     return np.dot(a, b) / (np.linalg.norm(a) + 1e-6) / (np.linalg.norm(b) + 1e-6)
-            #
-            # for idx_i, i in enumerate(weights.mod_embedding.key_to_embed_id.keys()):
-            #     for idx_j, j in enumerate(weights.mod_embedding.key_to_embed_id.keys()):
-            #         if idx_i <= idx_j:
-            #             continue
-            #         ii = weights.mod_embedding.key_to_embed_id[i]
-            #         jj = weights.mod_embedding.key_to_embed_id[j]
-            #         sim = cos_sim(weights.mod_embedding.embeddings[0][ii],
-            #                       weights.mod_embedding.embeddings[0][jj])
-            #         print(f"{i} <-> {j}: {sim}  ", end="")
-            #     print()
-
+            debug_mod_embedding(weights.mod_embedding)
 
 def update_score_count(config: NetworkConfig, conn: sqlite3.Connection):
     """
@@ -423,8 +457,8 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         _config = NetworkConfig(json.load(open(os.path.join(sys.argv[1], "config.json"))))
     else:
-        _config = NetworkConfig({"game_mode": "osu", "embedding_size": 20, "pass_band_width": 5})
+        _config = NetworkConfig.from_config("config/osu.json")
     conn = repository.get_connection()
-    # train_score_by_als(_config, conn)
+    train_score_by_als(_config, conn)
     update_score_count(_config, conn)
     # estimate_var_param(config)

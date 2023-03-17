@@ -1,12 +1,7 @@
-from abc import abstractmethod, ABCMeta
-from collections import defaultdict
-
-from scipy import stats, integrate
+import pickle
+import time
 
 import osu_utils
-import time
-import train_pass_kernel
-import json
 from data.model import *
 from recommend import PPRuleSet, ManiaPPV3, ManiaPPV4, STDPP
 
@@ -30,17 +25,61 @@ class PPRecommender:
         else:
             raise
 
+    def similarity_tree(self, uid, variant):
+
+        embedding_names = self.config.get_embedding_names(UserEmbedding.EMBEDDING)
+        embedding = repository.select_first(self.connection, UserEmbedding.TABLE_NAME,
+                                            project=embedding_names,
+                                            where={
+                                                UserEmbedding.GAME_MODE: self.config.game_mode,
+                                                UserEmbedding.VARIANT: variant,
+                                                UserEmbedding.USER_ID: uid
+                                            })
+        if embedding is None:
+            return None
+        embedding = np.asarray([embedding])
+
+        with open(self.config.ball_tree_path, 'rb') as f:
+            nbrs, user_ids, first_variant = pickle.load(f)
+
+        if first_variant != variant:
+            # trick: add a large value to the first dimension if variant is different
+            embedding[0, 0] += 50
+
+        nbrs_distance, nbrs_index = nbrs.kneighbors(embedding)
+        nbrs_user_ids = user_ids[nbrs_index[0]]
+        nbrs_distance = nbrs_distance[0]
+        id_to_distance = dict(zip(nbrs_user_ids, nbrs_distance))
+
+        cursor = repository.execute_sql(
+            self.connection,
+            (f"SELECT {User.ID}, {User.NAME}, {User.PP} "
+             f"FROM User "
+             f"WHERE {User.ID} IN ({','.join(map(str, id_to_distance.keys()))}) "
+             f"AND {User.GAME_MODE} == '{self.config.game_mode}' "
+             f"AND {User.VARIANT} == '{variant}' ")
+        )
+        data = []
+        for x in cursor:
+            cur_uid, cur_name, cur_pp = x
+            distance = id_to_distance.get(int(cur_uid), -100000)
+            data.append([cur_uid, cur_name, cur_pp, distance])
+        data_df = pd.DataFrame(data, columns=["id", "name", "pp", "distance"])
+        data_df.sort_values(by=["distance", "id"], ascending=True, inplace=True)
+
+        return data_df
+
     def similarity(self, uid, variant):
 
         cur_nbrs_ids, cur_nbrs_distance = \
-        repository.select(self.connection, UserEmbedding.TABLE_NAME,
-                          [UserEmbedding.NEIGHBOR_ID,
-                           UserEmbedding.NEIGHBOR_DISTANCE],
-                          where={
-                              UserEmbedding.USER_ID: uid,
-                              UserEmbedding.VARIANT: variant,
-                              UserEmbedding.GAME_MODE: self.config.game_mode
-                          }).fetchone()
+            repository.select(self.connection, UserEmbedding.TABLE_NAME,
+                              [UserEmbedding.NEIGHBOR_ID,
+                               UserEmbedding.NEIGHBOR_DISTANCE],
+                              where={
+                                  UserEmbedding.USER_ID: uid,
+                                  UserEmbedding.VARIANT: variant,
+                                  UserEmbedding.GAME_MODE: self.config.game_mode
+                              }).fetchone()
         cur_nbrs_ids = list(repository.db_to_np(cur_nbrs_ids))
         cur_nbrs_distance = list(repository.db_to_np(cur_nbrs_distance))
         id_to_distance = dict(zip(cur_nbrs_ids, cur_nbrs_distance))
@@ -165,36 +204,12 @@ def test_mania():
     import matplotlib.pyplot as plt
 
     uid = sys.argv[-1]
+    config = NetworkConfig.from_config("mania.json")
 
     connection = repository.get_connection()
-    recommender = PPRecommender(NetworkConfig(), connection, rule=4)
+    recommender = PPRecommender(config, connection, rule=4)
     data = recommender.predict(uid, key_count=[4])
     data_json = data.reset_index(inplace=False).to_json(orient='records', index=True)
-
-    for i in range(10):
-        x = data.iloc[i]
-        bid, mod = x.name
-
-        min_score, max_score, probs, true_score = recommender.draw_prediction_distribution_diagram(
-            uid, '4k', str(bid), mod)
-        x = np.linspace(min_score, max_score, num=len(probs))
-
-        true_score_index = 0
-        if true_score is not None:
-            true_score_index = int((true_score - min_score) / (max_score - min_score) * len(x))
-            if true_score_index >= len(x):
-                true_score_index = len(x) - 1
-
-        plt.clf()
-        plt.ylim([0, 1.05])
-        plt.fill_between(x[true_score_index:], probs[true_score_index:], color='b', alpha=0.3)
-        if true_score is not None:
-            plt.text(x[true_score_index], probs[true_score_index] - 0.05,
-                     ' ← Current', fontsize=10, color='black')
-        ax = plt.gca()
-        ax.get_yaxis().set_visible(False)
-        plt.plot(x, probs)
-        plt.savefig(f"{bid}.png")
 
     user_name = repository.select_first(connection, User.TABLE_NAME, project=[User.NAME],
                                         where={User.ID: uid})
@@ -221,21 +236,17 @@ def test_mania():
 
 def test_std():
     import sys
-    import matplotlib.pyplot as plt
 
     uid = sys.argv[-1]
-    config = NetworkConfig({
-        "game_mode": "osu",
-        "embedding_size": 20,
-        "pass_band_width": 5,
-        "pass_power": 0.5
-    })
+    config = NetworkConfig.from_config("config/osu.json")
 
     connection = repository.get_connection()
     user_name = repository.select_first(connection, User.TABLE_NAME, project=[User.NAME],
                                         where={User.ID: uid})
+    print(user_name)
     recommender = PPRecommender(config, connection)
-    user_beatmap_ids = connection.execute("SELECT beatmap_id, pp FROM Score WHERE user_id == " + uid)
+    user_beatmap_ids = connection.execute(
+        "SELECT beatmap_id, pp FROM Score WHERE user_id == " + uid)
     beatmap_ids_to_real_pp = {}
     for x in user_beatmap_ids:
         beatmap_ids_to_real_pp[x[0]] = x[1]
@@ -244,16 +255,9 @@ def test_std():
     results_recommend = {}
     user_bp = recommender.pp_rule_set.user_bp(uid)
     for mod in osu_utils.STD_MODS.values():
-        # data = recommender.recall(uid, beatmap_ids=list(beatmap_ids_to_real_pp.keys()), required_mods=mod)
         data = recommender.recall(uid, beatmap_ids=[], required_mods=mod,
                                   min_pp=min(user_bp.pp_order_list), max_size=3000)
-
-        # real_pp = []
-        # for i, row in data.iterrows():
-        #     real_pp.append(beatmap_ids_to_real_pp[i[0]])
-        # data['real_pp'] = real_pp
         results["".join(mod)] = data.copy()
-
         data = recommender.rank(uid, data, user_bp)
         results_recommend["".join(mod)] = data.copy()
     save_excel(results, f"report/std/{user_name[0]}_bp.xlsx", 0)
@@ -262,8 +266,14 @@ def test_std():
     st = time.time()
     similar_users = recommender.similarity(uid, "")
     print(f"Similarity time: {time.time() - st}")
+
+    st = time.time()
+    similar_users_db = recommender.similarity_tree(uid, "")
+    print(f"Similarity time db: {time.time() - st}")
+
     save_excel({
-        "users": similar_users
+        "users": similar_users,
+        "db": similar_users_db,
     }, os.path.join("report", "std", f"{user_name[0]} - similar users.xlsx"), 0)
 
 

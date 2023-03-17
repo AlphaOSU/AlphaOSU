@@ -1,4 +1,5 @@
 from sklearn.neighbors import NearestNeighbors
+import pickle
 
 from data import data_process
 from data.model import *
@@ -17,7 +18,7 @@ def construct_nearest_neighbor(config: NetworkConfig):
     weights = data_process.load_weight(config)
     key_to_embed_id: dict = weights.user_embedding.key_to_embed_id.to_dict()
     user_embs = weights.user_embedding.embeddings[0]
-    user_ids = np.zeros((len(user_embs),), dtype=np.int32)
+    user_ids = np.zeros((len(user_embs),), dtype=np.int32) # emb_id -> user id
 
     first_variant = None
     for key, emb_id in key_to_embed_id.items():
@@ -33,6 +34,9 @@ def construct_nearest_neighbor(config: NetworkConfig):
     # find NearestNeighbors
     print("Fitting")
     nbrs = NearestNeighbors(n_neighbors=150, n_jobs=-1).fit(user_embs)
+    with open(config.ball_tree_path, 'wb') as f:
+        pickle.dump((nbrs, user_ids, first_variant), f)
+    print("Find neighbors")
     nbrs_distance, nbrs_index = nbrs.kneighbors(user_embs)
 
     # save into database
@@ -118,4 +122,4 @@ def estimate_pass_probability(uid, variant, beatmap_ids, speed, config: NetworkC
 
 
 if __name__ == "__main__":
-    construct_nearest_neighbor(NetworkConfig({"game_mode": "osu", "embedding_size": 20}))
+    construct_nearest_neighbor(NetworkConfig.from_config("config/osu.json"))
