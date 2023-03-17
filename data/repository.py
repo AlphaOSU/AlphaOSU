@@ -1,11 +1,14 @@
-import sqlite3
-from typing import Iterable, Dict, Union
+"""
+A wrapper for sqlite3 database
+"""
 import csv
-import os
 import io
-import numpy as np
+import os
+import sqlite3
 import time
-import struct
+from typing import Iterable, Dict, Union
+
+import numpy as np
 
 
 def np_to_db(arr):
@@ -22,28 +25,6 @@ def db_to_np(text):
     out.seek(0)
     return np.load(out)
 
-
-def np_to_db2(arr: np.ndarray):
-    """
-    http://stackoverflow.com/a/31312102/190597 (SoulNibbler)
-    """
-    arr.flatten()
-    return sqlite3.Binary(out.read())
-
-
-def db_to_np2(text):
-    if text is None:
-        return None
-    out = io.BytesIO(text)
-    out.seek(0)
-    return np.load(out)
-
-
-# Converts np.array to TEXT when inserting
-# sqlite3.register_adapter(np.ndarray, adapt_array)
-
-# Converts TEXT to np.array when selecting
-# sqlite3.register_converter("NDARRAY", convert_array)
 
 def get_connection(deploy=False, result_path="result"):
     if not os.path.isdir(result_path):

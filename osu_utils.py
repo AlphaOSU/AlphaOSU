@@ -8,6 +8,14 @@ import json
 
 
 def invoke_osu_tools(beatmap_path, dt_star=False, ht_star=False):
+    """
+    Invoke osu tools for sr calculation.
+    See https://github.com/ppy/osu-tools/ for more details.
+    @param beatmap_path: beatmap_path
+    @param dt_star: if return DT sr only
+    @param ht_star: if return HT sr only
+    @return: result
+    """
     cmd = list(api.get_secret_value("osu_tools_command", []))
     assert len(cmd) > 0
     cmd.extend(["difficulty", beatmap_path, "-j"])
@@ -22,6 +30,9 @@ def invoke_osu_tools(beatmap_path, dt_star=False, ht_star=False):
 
 
 def mania_pp(score, od, star, objects, power=np.power, where=np.where, abs=np.abs):
+    """
+    @deprecated this is old mania PP calculation. New version is mania_pp_v4().
+    """
     d = power((25 * star - 4), 2.2) / 135
     d = where(star < 0.2, 1 / 135, d)
     l = 1 + 0.1 * where(1500.0 < objects, 1500.0, objects) / 1500
@@ -48,6 +59,16 @@ def mania_pp(score, od, star, objects, power=np.power, where=np.where, abs=np.ab
 
 
 def mania_pp_v4(custom_acc, star, objects, power=np.power, max=np.maximum, min=np.minimum):
+    """
+    Calculate mania PP.
+    @param custom_acc: PP acc
+    @param star: sr
+    @param objects: number of objects ( = rice notes + LN notes)
+    @param power: power function
+    @param max: max function
+    @param min: min function
+    @return: PP
+    """
     diff_pp = power(max(star - 0.15, 0.05), 2.2)
     acc_pp = max(5 * custom_acc - 4, 0)
     length_pp = 1 + 0.1 * min(1.0, objects / 1500)
@@ -69,6 +90,14 @@ b_acc = -k_acc * min_acc - 1 + ep
 
 
 def map_osu_score(score, real_to_train: bool, arctanh=np.arctanh, tanh=np.tanh):
+    """
+    Scale scores to [-1, 1] for stable training.
+    @param score: if real_to_train, this is real osu score, otherwise the scores for training.
+    @param real_to_train: if true, perform real -> training, otherwise training -> real
+    @param arctanh: arctanh function
+    @param tanh: tanh function
+    @return: if real_to_train, return scores for training, else return real osu scores.
+    """
     global k_score, b_score, min_score, max_score
     if real_to_train:
         return arctanh(k_score * np.clip(score, min_score, max_score) + b_score)
@@ -77,6 +106,14 @@ def map_osu_score(score, real_to_train: bool, arctanh=np.arctanh, tanh=np.tanh):
 
 
 def map_osu_acc(acc, real_to_train: bool, arctanh=np.arctanh, tanh=np.tanh):
+    """
+    Scale acc to [-1, 1] for stable training.
+    @param acc: if real_to_train, this is real osu acc, otherwise the acc for training.
+    @param real_to_train: if true, perform real -> training, otherwise training -> real
+    @param arctanh: arctanh function
+    @param tanh: tanh function
+    @return: if real_to_train, return acc for training, else return real osu acc.
+    """
     global k_acc, b_acc, min_acc, max_acc
     if real_to_train:
         return arctanh(k_acc * np.clip(acc, min_acc, max_acc) + b_acc)
@@ -85,6 +122,16 @@ def map_osu_acc(acc, real_to_train: bool, arctanh=np.arctanh, tanh=np.tanh):
 
 
 def predict_score_std(connection, uid, variant, config: NetworkConfig, bid, mod):
+    """
+    Predict score with standard deviation using Beyasian Linear Regression.
+    @param connection: db connection
+    @param uid: user id
+    @param variant: 4k/7k
+    @param config: configuration
+    @param bid: beatmap id
+    @param mod: mod text, HT/DT/NM/...
+    @return: score and std.
+    """
     x = repository.select(connection, [UserEmbedding.TABLE_NAME, BeatmapEmbedding.TABLE_NAME,
                                        ModEmbedding.TABLE_NAME],
                           project=[
@@ -140,12 +187,22 @@ def predict_score_std(connection, uid, variant, config: NetworkConfig, bid, mod)
     var_mod = (np.dot(user_beatmap_embedding, mod_sigma) * user_beatmap_embedding).sum() + (
             1.0 / mod_alpha)
 
+    # These magic numbers are estimated in train_score_als_db.estimate_var_param()
     std = 0.06018866012651341 * var_beatmap + 0.29444196224551056 * var_user + 0.23866568666941756 * var_mod
     std = np.sqrt(std)
     return x, std
 
 
 def predict_score(connection, where_dict, embedding_size, projection, limit=None):
+    """
+    Predict scores Using Linear Regression. This function is faster than predict_score_std*()
+    @param connection: db connection
+    @param where_dict: db query constraints
+    @param embedding_size: embedding size
+    @param projection: db query column projection
+    @param limit: db query result limits.
+    @return: scores
+    """
     project_templates = []
     for i in range(embedding_size):
         project_templates.append(
@@ -173,7 +230,16 @@ WHERE {wheres} AND Beatmap.id == BeatmapEmbedding.id
 @measure_time
 def get_user_bp(connection, user_id,
                 config: NetworkConfig, max_length=100,
-                is_acc=False):  # return (bid, speed) -> (score, pp)
+                is_acc=False) -> BestPerformance:
+    """
+    Get user's best performance.
+    @param connection: db connection
+    @param user_id: user id
+    @param config: configuration
+    @param max_length: bp max length
+    @param is_acc: fetch score or acc
+    @return: BestPerformance
+    """
     if is_acc:
         score = Score.CUSTOM_ACCURACY
     else:
@@ -196,47 +262,3 @@ ORDER BY Score.pp DESC
         user_bp.update(int(bid), int(speed), score, pp, star, score_id=score_id,
                        cs=cs)  # , embeddings)
     return user_bp
-
-
-def estimate_user_embedding(user_bp: BestPerformance):
-    embeddings = np.asarray(user_bp.data['embedding'].tolist())  # [L, E]
-    scores = map_osu_score(user_bp.data['score'].to_numpy().astype(np.float32),
-                           real_to_train=True)  # [L]
-    pps = user_bp.data['pp'].to_numpy()
-
-    # y = kx + b
-    y = scores - embeddings[:, -1]
-    x = embeddings[:, :-1]
-    regr = LinearRegression()
-    regr.fit(x, y, pps / np.mean(pps))
-    emb = regr.coef_.tolist()
-    emb.append(float(regr.intercept_))
-    return emb
-
-
-# if __name__ == "__main__":
-    # with repository.get_connection() as conn:
-    #     bp = get_user_bp(conn, uid, NetworkConfig())
-    #     print(estimate_user_embedding(bp))
-    # print(mania_pp(898231, 9.0, 7.00, 2404 + 57))
-    # print(mania_pp(986114, 8.2, 6.40, 2259 + 1349))
-    #
-    # print(mania_pp(816323, 9, 8.289408218280933, 257 + 1671))
-    # print(estimate_star_from_score(603.614, 816323, 257 + 1671, 9))
-
-    # print(mania_pp(1_000_000, 8.0, 5.0, 10000))
-    # print(mania_pp(500_000, 8.0, 5.0, 10000))
-    # print(mania_pp(960_000, 8.0, 5.0, 10000))
-    #
-    # print(mania_pp_v4(1, 5.0, 10000))
-    # print(mania_pp_v4(0.9, 5.0, 10000))
-    # print(mania_pp_v4(0.8, 5.0, 10000))
-    # print(map_osu_score(850000, real_to_train=True))
-    # print(map_osu_score(960000, real_to_train=True))
-    # print(map_osu_score(990000, real_to_train=True))
-    # print(map_osu_score(999000, real_to_train=True))
-    # print(map_osu_score(1000000, real_to_train=True))
-    #
-    # print(map_osu_score(1, real_to_train=False))
-
-    # print(estimate_star_from_acc(505.91, 0.945932922127987, 10000))

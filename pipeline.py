@@ -10,6 +10,9 @@ import time
 
 
 class RedirectLogger:
+    """
+    Redirect the logs to both stdout and file.
+    """
 
     def __init__(self, name, std_out):
         log_dir = os.path.join("result", "log")
@@ -52,42 +55,52 @@ if __name__ == "__main__":
     config = NetworkConfig()
 
     try:
+        # First, remove the log dir
         shutil.rmtree(os.path.join("result", "log"), ignore_errors=True)
+
+        # Second, fetch data
         register_log_output("data_fetch")
         data_fetcher.fetch()
 
+        # Third, train the score prediction model.
         register_log_output("train_score")
         train_score_als_db.train_score_by_als(config)
         with repository.get_connection() as conn:
             train_score_als_db.update_score_count(conn)
 
+        # Fourth, train the pass model.
         register_log_output("train_pass")
         train_pass_kernel.construct_nearest_neighbor(config)
 
-        # deploy
+        # Finally, deploy it!!
         register_log_output("deploy")
         with repository.get_connection() as conn:
 
+            # Create beatmap index for fast beatmap searching.
+            # See https://www.sqlite.org/fts3.html for more details.
             print("Index Beatmap")
             repository.execute_sql(conn, "DROP TABLE IF EXISTS BeatmapSearch")
             repository.execute_sql(conn, "CREATE VIRTUAL TABLE IF NOT EXISTS BeatmapSearch USING fts4(id, set_id, name, version, creator)")
             repository.execute_sql(conn, "INSERT INTO BeatmapSearch SELECT id, set_id, name, version, creator FROM Beatmap")
             conn.commit()
 
+            # VACCUM database for saving server disk space
             print("VACCUM")
             conn.execute("VACUUM")
+
 
             deploy_db_file = os.path.join("result", "data_deploy.db")
             backup_db_file = os.path.join("result", "data_deploy_backup.tar.gz")
             training_db_file = os.path.join("result", "data.db")
 
+            # Backup old database to avoid accidents.
             print("Backup")
             if os.path.isfile(deploy_db_file):
                 with open(deploy_db_file, "rb") as fin, gzip.open(backup_db_file, "wb") as fout:
                     shutil.copyfileobj(fin, fout)
 
             print("Deploy")
-            # fast deploy by moving
+            # Fast deploy by directly moving
             shutil.move(training_db_file, deploy_db_file)
             
             print("Copy back")
