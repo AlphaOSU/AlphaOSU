@@ -7,6 +7,7 @@ session = None
 recent_request = None
 recent_request_time = 0
 secret_object = None
+auth_file = "auth.json"
 
 DEBUG = False
 REQUEST_MIN_INTERVAL = 1
@@ -82,7 +83,7 @@ def auth(params, save_name):
 def get_access_token():
     # get cache token
     auth_data = {}
-    auth_cache_name = "auth.json"
+    auth_cache_name = auth_file
     if os.path.exists(auth_cache_name):
         auth_data = json.load(open(auth_cache_name))
     expire_time = auth_data.get('expire_time', 0)

@@ -471,7 +471,7 @@ def fetch():
 
     try:
         for variant in ['4k', '7k']:
-            for country in [None, "CN", "US"]:
+            for country in [None, "CN", "US", "KR"]:
                 fetch_user_ranking(game_mode='mania', variant=variant, country=country)
 
         fetch_ranked_beatmaps(3)
@@ -494,6 +494,8 @@ def fetch_best_performance_for_user_online(uid, connection):
         repository.insert_or_replace(connection, Beatmap.TABLE_NAME, beatmap_db_data)
         insert_scores(connection, score_db_data)
 
+def set_auth_file(auth_file):
+    api.auth_file = auth_file
 
 def update_single_user(connection, config: NetworkConfig, user_name=None, user_id=None):
     game_mode = config.game_mode
