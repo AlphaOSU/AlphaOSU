@@ -455,7 +455,7 @@ def fetch_ranked_beatmaps(mode_int, max_maps=1000000):
         data = api.request_auth_api('beatmapsets/search/', method='GET', params=state['params'])
         state['total'] = data['total']
         db_data = []
-        for beatset in tqdm(data["beatmapsets"]):
+        for beatset in data["beatmapsets"]:
             for beatmap in beatset["beatmaps"]:
                 x = parse_beatmap_data(beatmap, beatset, beatmap_conn, mode_int=mode_int)
                 if x is None:
@@ -659,6 +659,8 @@ def fetch_best_performance_for_user_online(config, uid, connection):
         repository.insert_or_replace(connection, Beatmap.TABLE_NAME, beatmap_db_data)
         insert_scores(connection, score_db_data)
 
+def set_auth_file(auth_file):
+    api.auth_file = auth_file
 
 def update_single_user(connection, config: NetworkConfig, user_name=None, user_id=None):
     """
@@ -736,7 +738,7 @@ def fetch_mania():
 
     try:
         for variant in ['4k', '7k']:
-            for country in [None, "CN", "US"]:
+            for country in [None, "CN", "US", "KR"]:
                 fetch_user_ranking(game_mode='mania', variant=variant, country=country)
 
         fetch_ranked_beatmaps(3)
