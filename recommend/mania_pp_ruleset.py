@@ -158,7 +158,7 @@ class ManiaPP(PPRuleSet):
         for x in cursor:
             score, bid, speed, variant, od, count1, count2, \
             star_ht, star_nm, star_dt, cs, version, name, set_id, \
-            count_ht, count_nm, count_dt, mod_max_pp, mod_star = x[:len(base_projection) + 1]
+            count_ht, count_nm, count_dt = x[:len(base_projection) + 1]
             # print(int(bid))
             if len(beatmap_ids) != 0 and int(bid) not in beatmap_ids:
                 continue
@@ -179,7 +179,7 @@ class ManiaPP(PPRuleSet):
                     continue
             if star < min_star:
                 continue
-            data_list.append([bid, mod, star, score, 0, self.map,
+            data_list.append([bid, mod, star, score, 0, self.map_beatmap_name(name, version),
                               od, count1 + count2, speed, variant, cs, set_id, count])
         data = pd.DataFrame(data_list,
                             columns=['id', "mod", "star", "pred_score", "pred_pp", "name",

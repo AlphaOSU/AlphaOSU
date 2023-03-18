@@ -699,7 +699,7 @@ def update_single_user(connection, config: NetworkConfig, user_name=None, user_i
         uid = u_data[User.ID]
         with connection:
             repository.insert_or_replace(connection, User.TABLE_NAME, [u_data])
-        # fetch_best_performance_for_user_online(config, uid, connection)
+        fetch_best_performance_for_user_online(config, uid, connection)
         if game_mode == 'mania':
             post_process_db_mania(uid, connection)
         elif game_mode == 'osu':

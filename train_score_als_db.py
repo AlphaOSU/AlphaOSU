@@ -267,7 +267,7 @@ def train_personal_embedding_online(config: NetworkConfig, key, connection):
             UserEmbedding.NEIGHBOR_DISTANCE: repository.np_to_db(neighbor_distance),
         }], wheres=[constraint])
 
-def debug_mod_embedding(mod_embedding: EmbeddingData):
+def debug_mod_embedding(mod_embedding: EmbeddingData, config: NetworkConfig):
     def cos_sim(a, b):
         return np.dot(a, b) / (np.linalg.norm(a) + 1e-6) / (np.linalg.norm(b) + 1e-6)
     for idx_i, i in enumerate(mod_embedding.key_to_embed_id.keys()):
@@ -278,8 +278,12 @@ def debug_mod_embedding(mod_embedding: EmbeddingData):
             jj = mod_embedding.key_to_embed_id[j]
             sim = cos_sim(mod_embedding.embeddings[0][ii],
                           mod_embedding.embeddings[0][jj])
-            mod_i = "".join(osu_utils.STD_MODS[str(i)])
-            mod_j = "".join(osu_utils.STD_MODS[str(j)])
+            if config.game_mode == 'osu':
+                mod_i = "".join(osu_utils.STD_MODS[str(i)])
+                mod_j = "".join(osu_utils.STD_MODS[str(j)])
+            else:
+                mod_i = i
+                mod_j = j
             print(f"{mod_i} <-> {mod_j}: {sim:.5f}  ", end="")
         print()
 
@@ -315,7 +319,7 @@ def train_score_by_als(config: NetworkConfig, connection: sqlite3.Connection):
     def provide_mod_data(k, e):
         return provider.provide_mod_data(k, e)
 
-    debug_mod_embedding(weights.mod_embedding)
+    debug_mod_embedding(weights.mod_embedding, config)
 
     for epoch in range(200):
 
@@ -327,7 +331,6 @@ def train_score_by_als(config: NetworkConfig, connection: sqlite3.Connection):
                             weights.beatmap_embedding, statistics, pbar, weights.user_embedding,
                             weights.mod_embedding)
         tqdm.write(pbar.desc)
-        print(len(provider.dirty_beatmap))
 
         # train user
         statistics = TrainingStatistics("user", len(weights.user_embedding.key_to_embed_id))
@@ -337,7 +340,6 @@ def train_score_by_als(config: NetworkConfig, connection: sqlite3.Connection):
                             weights.user_embedding, statistics, pbar, weights.beatmap_embedding,
                             weights.mod_embedding)
         tqdm.write(pbar.desc)
-        print(len(provider.dirty_user))
 
         cur_r2 = mean(statistics.r2_adj_list)
         if previous_r2 >= cur_r2:
@@ -366,7 +368,7 @@ def train_score_by_als(config: NetworkConfig, connection: sqlite3.Connection):
                                 weights.beatmap_embedding, cachable=False)
             tqdm.write(pbar.desc)
 
-            debug_mod_embedding(weights.mod_embedding)
+            debug_mod_embedding(weights.mod_embedding, config)
 
 def update_score_count(config: NetworkConfig, conn: sqlite3.Connection):
     """

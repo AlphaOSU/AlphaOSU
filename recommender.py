@@ -71,7 +71,7 @@ class PPRecommender:
 
     def similarity(self, uid, variant):
 
-        cur_nbrs_ids, cur_nbrs_distance = \
+        result = \
             repository.select(self.connection, UserEmbedding.TABLE_NAME,
                               [UserEmbedding.NEIGHBOR_ID,
                                UserEmbedding.NEIGHBOR_DISTANCE],
@@ -80,6 +80,9 @@ class PPRecommender:
                                   UserEmbedding.VARIANT: variant,
                                   UserEmbedding.GAME_MODE: self.config.game_mode
                               }).fetchone()
+        if result is None:
+            return None
+        cur_nbrs_ids, cur_nbrs_distance = result
         cur_nbrs_ids = list(repository.db_to_np(cur_nbrs_ids))
         cur_nbrs_distance = list(repository.db_to_np(cur_nbrs_distance))
         id_to_distance = dict(zip(cur_nbrs_ids, cur_nbrs_distance))
@@ -136,7 +139,7 @@ class PPRecommender:
         return self.pp_rule_set.rank(uid, data, user_bp)
 
     def predict(self, uid, key_count, beatmap_ids=[], max_star=None, max_size=300, min_star=0,
-                min_pp=None):
+                min_pp=None, required_mods=None):
 
         st = time.time()
         user_bp = self.pp_rule_set.user_bp(uid)
@@ -145,7 +148,7 @@ class PPRecommender:
             return None
 
         st = time.time()
-        data = self.recall(uid, key_count, beatmap_ids, max_star, max_size, min_star, min_pp)
+        data = self.recall(uid, key_count, beatmap_ids, max_star, max_size, min_star, required_mods, min_pp)
         print(f"Recall time: {time.time() - st}")
 
         st = time.time()

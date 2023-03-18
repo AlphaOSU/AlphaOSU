@@ -28,6 +28,7 @@ class STDPP(PPRuleSet):
 
         probable_pps, break_probs, \
         pp_gains, true_pps, pass_probs, true_score_ids = [], [], [], [], [], []
+        true_mods = []
         stars = []
         pass_feature_list = defaultdict(lambda: [])
         pass_feature_list_index = defaultdict(lambda: [])
@@ -69,6 +70,7 @@ class STDPP(PPRuleSet):
             probable_pps.append(probable_pp)
             break_probs.append(round(break_prob, 6))
             stars.append(star)
+            true_mods.append(true_mod)
             true_score_ids.append(int(true_score_id) if true_score_id is not None else None)
             # pp gain
             if probable_pp is not None:
@@ -108,6 +110,7 @@ class STDPP(PPRuleSet):
         data["pp_gain (breaking)"] = pp_gains
         data['true_pp'] = true_pps
         data['true_score_id'] = true_score_ids
+        data['true_mod'] = true_mods
         data['pp_gain_expect'] = data['pp_gain (breaking)'] * data['break_prob'] * data['pass_prob']
 
         data = pd.DataFrame(data,
@@ -118,7 +121,7 @@ class STDPP(PPRuleSet):
                                      'break_prob',
                                      'pp_gain (breaking)', 'pass_prob', 'set_id',
                                      'valid_count',
-                                     'pp_gain_expect', 'true_score_id'])
+                                     'pp_gain_expect', 'true_score_id', 'true_mod'])
         data.sort_values(by="pp_gain_expect", ascending=False, inplace=True)
         return data
 
