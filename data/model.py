@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 import bisect
@@ -110,7 +111,9 @@ class ModEmbedding:
     TABLE_NAME = "ModEmbedding"
     PRIMARY_KEYS = ['mod']
 
+    # TODO: in mania, mod stores text (e.g., DT, NM). In std, we stores mod int for convinience.
     MOD = 'mod'
+    MOD_TEXT = "mod_text"
     SPEED = 'speed'
     IS_ACC = "is_acc"
 
@@ -122,75 +125,13 @@ class ModEmbedding:
             ModEmbedding.MOD: "TEXT NOT NULL",
             ModEmbedding.SPEED: "INTEGER NOT NULL",
             ModEmbedding.IS_ACC: "BOOLEAN NOT NULL",
+            ModEmbedding.MOD_TEXT: "INTEGER DEFAULT -1",
         }, primary_keys=ModEmbedding.PRIMARY_KEYS)
 
     @staticmethod
     def construct_where(mod):
         return {
             ModEmbedding.MOD: mod
-        }
-
-
-class Beatmap:
-    TABLE_NAME = "Beatmap"
-    PRIMARY_KEYS = ["id"]
-
-    ID = "id"
-    SET_ID = "set_id"
-    NAME = "name"
-    VERSION = "version"
-    GAME_MODE = "game_mode"
-    CREATOR = "creator"
-
-    LENGTH = "length"
-    BPM = "bpm"
-    CS = "cs"
-    HP = "hp"
-    OD = "od"
-    AR = "ar"
-    STAR = "star"
-    DT_STAR = "dt_star"
-    HT_STAR = "ht_star"
-    SUM_SCORES = "sum_scores"
-
-    PASS_COUNT = "pass_count"
-    PLAY_COUNT = "play_count"
-    COUNT_CIRCLES = "count_circles"
-    COUNT_SLIDERS = "count_sliders"
-    COUNT_SPINNERS = "count_spinners"
-
-    @staticmethod
-    def create(conn: sqlite3.Connection):
-        repository.create_table(conn, table_name=Beatmap.TABLE_NAME, columns={
-            Beatmap.ID: "INTEGER NOT NULL",
-            Beatmap.SET_ID: "INTEGER",
-            Beatmap.NAME: "TEXT",
-            Beatmap.VERSION: "TEXT",
-            Beatmap.GAME_MODE: "TEXT",
-            Beatmap.CREATOR: "TEXT",
-            Beatmap.SUM_SCORES: "INTEGER DEFAULT 0",
-
-            Beatmap.LENGTH: "REAL",
-            Beatmap.BPM: "REAL",
-            Beatmap.CS: "REAL",
-            Beatmap.HP: "REAL",
-            Beatmap.OD: "REAL",
-            Beatmap.AR: "REAL",
-            Beatmap.STAR: "REAL",
-            Beatmap.DT_STAR: "REAL DEFAULT 0.0",
-            Beatmap.HT_STAR: "REAL DEFAULT 0.0",
-            Beatmap.PASS_COUNT: "INTEGER",
-            Beatmap.PLAY_COUNT: "INTEGER",
-            Beatmap.COUNT_CIRCLES: "INTEGER",
-            Beatmap.COUNT_SLIDERS: "INTEGER",
-            Beatmap.COUNT_SPINNERS: "INTEGER",
-
-        }, primary_keys=Beatmap.PRIMARY_KEYS)
-
-    @staticmethod
-    def construct_where(bid):
-        return {
-            Beatmap.TABLE_NAME + "." + Beatmap.ID: bid
         }
 
 
@@ -260,36 +201,80 @@ class Score:
         #                         columns=[Score.USER_ID])
 
 
-class CannotPass:
-    TABLE_NAME = "CannotPass"
+class Beatmap:
+    TABLE_NAME = "Beatmap"
+    PRIMARY_KEYS = ["id"]
 
-    USER_ID = "user_id"
-    USER_VARIANT = "variant"
-    USER_GAME_MODE = "game_mode"
+    ID = "id"
+    SET_ID = "set_id"
+    NAME = "name"
+    VERSION = "version"
+    GAME_MODE = "game_mode"
+    CREATOR = "creator"
+    LAST_UPDATED = "last_updated"
 
-    BEATMAP_ID = "beatmap_id"
+    LENGTH = "length"
+    BPM = "bpm"
+    CS = "cs"
+    HP = "hp"
+    OD = "od"
+    AR = "ar"
+    STAR = "star" # @deprecated: use mod_star instead
+    DT_STAR = "dt_star" # @deprecated: use mod_star instead
+    HT_STAR = "ht_star" # @deprecated: use mod_star instead
+    MOD_STAR = "mod_star"
 
-    SPEED = "speed"
+    SUM_SCORES = "sum_scores"
 
-    SCORE = "score"
-    PP = "pp"
-    PP_RANK = "pp_rank"
-    PASS = "pass"
+    PASS_COUNT = "pass_count"
+    PLAY_COUNT = "play_count"
+    COUNT_CIRCLES = "count_circles"
+    COUNT_SLIDERS = "count_sliders"
+    COUNT_SPINNERS = "count_spinners"
+
+    MOD_MAX_PP = "mod_max_pp"
 
     @staticmethod
-    def create(conn: sqlite3.Connection, table_name=TABLE_NAME):
-        repository.create_table(conn, table_name=table_name, columns={
-            CannotPass.USER_ID: "INTEGER NOT NULL",
-            CannotPass.USER_VARIANT: "TEXT NOT NULL",
-            CannotPass.USER_GAME_MODE: "TEXT NOT NULL",
-            CannotPass.BEATMAP_ID: "INTEGER NOT NULL",
-            CannotPass.SPEED: "INTEGER NOT NULL",
-            CannotPass.SCORE: "INTEGER",
-            CannotPass.PP: "INTEGER",
-            CannotPass.PP_RANK: "INTEGER",
-            CannotPass.PASS: "BOOL",
-        }, primary_keys=[CannotPass.USER_ID, CannotPass.USER_VARIANT, CannotPass.USER_GAME_MODE,
-                         CannotPass.BEATMAP_ID, CannotPass.SPEED])
+    def create(conn: sqlite3.Connection):
+        repository.create_table(conn, table_name=Beatmap.TABLE_NAME, columns={
+            Beatmap.ID: "INTEGER NOT NULL",
+            Beatmap.SET_ID: "INTEGER",
+            Beatmap.NAME: "TEXT",
+            Beatmap.VERSION: "TEXT",
+            Beatmap.GAME_MODE: "TEXT",
+            Beatmap.CREATOR: "TEXT",
+            Beatmap.SUM_SCORES: "INTEGER DEFAULT 0",
+
+            Beatmap.LENGTH: "REAL",
+            Beatmap.BPM: "REAL",
+            Beatmap.CS: "REAL",
+            Beatmap.HP: "REAL",
+            Beatmap.OD: "REAL",
+            Beatmap.AR: "REAL",
+            Beatmap.STAR: "REAL",
+            Beatmap.DT_STAR: "REAL DEFAULT 0.0",
+            Beatmap.HT_STAR: "REAL DEFAULT 0.0",
+            Beatmap.MOD_STAR: "TEXT DEFAULT NULL",
+            Beatmap.PASS_COUNT: "INTEGER",
+            Beatmap.PLAY_COUNT: "INTEGER",
+            Beatmap.COUNT_CIRCLES: "INTEGER",
+            Beatmap.COUNT_SLIDERS: "INTEGER",
+            Beatmap.COUNT_SPINNERS: "INTEGER",
+
+            Beatmap.MOD_MAX_PP: "TEXT DEFAULT NULL"
+
+        }, primary_keys=Beatmap.PRIMARY_KEYS)
+        repository.ensure_column(conn, table_name=Beatmap.TABLE_NAME, name_type_default=[
+            (Beatmap.MOD_STAR, "TEXT DEFAULT NULL", None),
+            (Beatmap.MOD_MAX_PP, "TEXT DEFAULT NULL", None),
+            (Beatmap.LAST_UPDATED, "INTEGER DEFAULT 0", None)
+        ])
+
+    @staticmethod
+    def construct_where(bid):
+        return {
+            Beatmap.TABLE_NAME + "." + Beatmap.ID: bid
+        }
 
 
 class Task:
@@ -351,6 +336,12 @@ def measure_time(fun):
 
 class NetworkConfig:
 
+    @staticmethod
+    def from_config(config_file):
+        config = json.load(open(config_file))
+        print("Load config:", config)
+        return NetworkConfig(config)
+
     def __init__(self, data_dict=None):
         if data_dict is None:
             data_dict = {}
@@ -360,7 +351,8 @@ class NetworkConfig:
         self.pp_weight_clip = data_dict.get('pp_weight_clip', 10)
         self.pass_band_width = data_dict.get('pass_band_width', 1)
         self.pass_basic_weight_played = data_dict.get('pass_basic_weight_played', 0.7)
-        self.pass_power = data_dict.get('pass_basic_weight_neighbor_played', 0.8)
+        self.pass_power = data_dict.get('pass_power', 0.8)
+        self.ball_tree_path = data_dict.get('ball_tree_path', 'ball-tree.pkl')
 
     def get_embedding_names(self, name, is_sigma=False, is_alpha=False):
         if is_sigma:

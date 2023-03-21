@@ -1,4 +1,5 @@
 from sklearn.neighbors import NearestNeighbors
+import pickle
 
 from data import data_process
 from data.model import *
@@ -13,10 +14,11 @@ def construct_nearest_neighbor(config: NetworkConfig):
     @return: None
     """
     connection = repository.get_connection()
+    print("Prepare weights")
     weights = data_process.load_weight(config)
     key_to_embed_id: dict = weights.user_embedding.key_to_embed_id.to_dict()
     user_embs = weights.user_embedding.embeddings[0]
-    user_ids = np.zeros((len(user_embs),), dtype=np.int32)
+    user_ids = np.zeros((len(user_embs),), dtype=np.int32) # emb_id -> user id
 
     first_variant = None
     for key, emb_id in key_to_embed_id.items():
@@ -30,7 +32,11 @@ def construct_nearest_neighbor(config: NetworkConfig):
             user_embs[emb_id, 0] += 50
 
     # find NearestNeighbors
+    print("Fitting")
     nbrs = NearestNeighbors(n_neighbors=150, n_jobs=-1).fit(user_embs)
+    with open(config.ball_tree_path, 'wb') as f:
+        pickle.dump((nbrs, user_ids, first_variant), f)
+    print("Find neighbors")
     nbrs_distance, nbrs_index = nbrs.kneighbors(user_embs)
 
     # save into database
@@ -40,6 +46,7 @@ def construct_nearest_neighbor(config: NetworkConfig):
     ])
     puts = []
     wheres = []
+    print("Saving")
     for key, emb_id in key_to_embed_id.items():
         e = key.split("-")
         puts.append({
@@ -55,16 +62,18 @@ def construct_nearest_neighbor(config: NetworkConfig):
         repository.update(connection, UserEmbedding.TABLE_NAME, puts, wheres)
 
 
-def estimate_pass_probability(uid, variant, beatmap_ids, speed, config: NetworkConfig, connection):
+def estimate_pass_probability(uid, variant, beatmap_ids, speed, config: NetworkConfig,
+                              connection, is_hr=False):
     """
     Using k-nearest neighbors algorithm to estimate the pass probability.
     Should be called after construct_nearest_neighbor()
-    @param uid: user id
-    @param variant: 4k / 7k
+    @param uid: user id, should be int
+    @param variant: mania: 4k / 7k, else: ""
     @param beatmap_ids: beatmap ids that want to calculate
     @param speed: -1/0/1 = HT/NM/DT
     @param config: configuration
     @param connection: db connection
+    @param is_hr: HR mod (std only)
     @return: probabilities for each beatmap id.
     """
     cur_nbrs_ids, cur_nbrs_distance = repository.select(connection, UserEmbedding.TABLE_NAME,
@@ -84,13 +93,19 @@ def estimate_pass_probability(uid, variant, beatmap_ids, speed, config: NetworkC
     user_id_to_weight = dict(zip(cur_nbrs_ids, cur_nbrs_weights))
 
     with connection:
-        cursor = connection.execute(f"SELECT {Score.BEATMAP_ID}, {Score.USER_ID} "
-                                    "FROM Score "
-                                    f"WHERE Score.user_id IN ({','.join(map(str, cur_nbrs_ids))}) "
-                                    f"AND Score.{Score.GAME_MODE} == ? "
-                                    f"AND Score.{Score.CS} == ? "
-                                    f"AND Score.SPEED == ? ",
-                                    [config.game_mode, variant[0], speed])
+        sql = (f"SELECT {Score.BEATMAP_ID}, {Score.USER_ID} "
+               f"FROM Score "
+               f"WHERE Score.{Score.USER_ID} IN ({','.join(map(str, cur_nbrs_ids))}) "
+               f"AND Score.{Score.GAME_MODE} == ? "
+               f"AND ({Score.SPEED} > ? OR ({Score.SPEED} == ? AND {Score.IS_HR} >= ? )) "
+               )
+        # Compare speed first, then compare HR if speeds are equal.
+        sql_params = [config.game_mode, speed, speed, int(is_hr)]
+
+        if config.game_mode == 'mania':
+            sql += f"AND Score.{Score.CS} == ? "
+            sql_params.append(variant[0])
+        cursor = connection.execute(sql, sql_params)
         for test_bid, test_uid in cursor:
             if test_bid not in beatmap_id_to_score_index:
                 continue
@@ -102,9 +117,9 @@ def estimate_pass_probability(uid, variant, beatmap_ids, speed, config: NetworkC
     weight_played = config.pass_basic_weight_played
     scores = np.where(played_flag == 1, scores * (1 - weight_played) + weight_played, scores)
     scores = np.power(scores, config.pass_power)
-
+    # scores = scores * 0.9999 + 0.0001
     return scores
 
 
 if __name__ == "__main__":
-    construct_nearest_neighbor(NetworkConfig())
+    construct_nearest_neighbor(NetworkConfig.from_config("config/osu.json"))

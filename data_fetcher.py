@@ -3,16 +3,20 @@ import random
 import time
 
 import requests
+from tqdm import tqdm
 from dateutil import parser
 
 import osu_utils
 from train_score_als_db import train_personal_embedding_online
 from data import api
 from data.model import *
+import subprocess
 
 
 def ensure_beatmap_star(beatmap_id, ht_star, dt_star):
     """
+    @deprecated use ensure_beatmap_attributes instead
+
     fetch the star of beatmap with HT or DT mod if it hadn't been fetched
     @param beatmap_id: the id of beatmap in osu
     @param ht_star:the star of beatmap with HT mod
@@ -40,6 +44,46 @@ def ensure_beatmap_star(beatmap_id, ht_star, dt_star):
     return ht_star, dt_star
 
 
+def ensure_beatmap_attributes(beatmap_id, mod_stars, mod_max_pp, mode):
+    """
+    fetch the sr / max pp of beatmap with various mods if it hadn't been fetched
+    @param beatmap_id: bid
+    @param mod_stars: a dict (mod_int -> sr)
+    @param mod_max_pp: a dict (mod_int -> max pp)
+    @param mode_int: game mode
+    @return: mod_stars, mod_max_pp
+    """
+    if mode == 'mania':
+        raise NotImplemented
+    elif mode == 'osu':
+        if mod_stars is not None and len(mod_stars) == len(osu_utils.STD_MODS) and mod_max_pp is not None:
+            return mod_stars, mod_max_pp
+
+        osu_website = api.get_secret_value("osu_website", api.OSU_WEBSITE)
+        r = api.request_api(f"osu/{beatmap_id}", "GET", osu_website, json=False)
+        base_cache = os.path.join("result", "cache")
+        os.makedirs(base_cache, exist_ok=True)
+        beatmap_path = os.path.join(base_cache, f"{beatmap_id}.osu")
+        beatmap_path = os.path.abspath(beatmap_path)
+        with open(beatmap_path, 'wb') as fd:
+            fd.write(r.content)
+
+        cmd = list(api.get_secret_value("osu_tools_command", []))
+        assert len(cmd) > 0
+        cmd.extend(["simulate", "osu", beatmap_path, "-m", "DT", "-m", "HD", "-m", "HR", "-p"])
+        result = json.loads(subprocess.check_output(cmd))
+
+        mod_stars = {}
+        mod_max_pp = {}
+        for x in result:
+            mod_int = osu_utils.mods_to_db_key(list(map(lambda o: o['acronym'], x['score']['mods'])))
+            mod_stars[mod_int] = round(x['difficulty_attributes']['star_rating'], 5)
+            mod_max_pp[mod_int] = round(x['performance_attributes']['pp'], 5)
+        os.remove(beatmap_path)
+        return mod_stars, mod_max_pp
+    else:
+        raise NotImplemented
+
 def parse_beatmap_data(beatmap_data, beatmapset_data, conn: sqlite3.Connection, mode=None,
                        mode_int=None):
     """
@@ -59,18 +103,8 @@ def parse_beatmap_data(beatmap_data, beatmapset_data, conn: sqlite3.Connection, 
         return None
     if mode_int is not None and beatmap_data['mode_int'] != mode_int:
         return None
-    old = repository.select_first(conn, Beatmap.TABLE_NAME,
-                                  project=[Beatmap.SUM_SCORES, Beatmap.HT_STAR, Beatmap.DT_STAR],
-                                  where={Beatmap.ID: beatmap_data['id']})
-    if old is None:
-        old_sum, ht_star, dt_star = 0, 0, 0
-    else:
-        old_sum, ht_star, dt_star = old
-    try:
-        ht_star, dt_star = ensure_beatmap_star(beatmap_data['id'], ht_star, dt_star)
-    except:
-        print(f"ensure_beatmap_star error in {beatmap_data['id']}!!!")
-
+    if mode is None and mode_int is not None:
+        mode = ['osu', 'taiko', 'fruits', 'mania'][mode_int]
     result = {
         Beatmap.ID: beatmap_data['id'],
         Beatmap.SET_ID: beatmap_data['beatmapset_id'],
@@ -78,7 +112,7 @@ def parse_beatmap_data(beatmap_data, beatmapset_data, conn: sqlite3.Connection, 
         Beatmap.VERSION: beatmap_data['version'],
         Beatmap.GAME_MODE: beatmap_data['mode'],
         Beatmap.CREATOR: beatmapset_data['creator'],
-        Beatmap.SUM_SCORES: old_sum,
+        Beatmap.LAST_UPDATED: int(parser.parse(beatmap_data['last_updated']).timestamp()),
 
         Beatmap.LENGTH: beatmap_data['hit_length'],
         Beatmap.BPM: beatmap_data['bpm'],
@@ -92,9 +126,51 @@ def parse_beatmap_data(beatmap_data, beatmapset_data, conn: sqlite3.Connection, 
         Beatmap.COUNT_SPINNERS: beatmap_data['count_spinners'],
         Beatmap.PASS_COUNT: beatmap_data['passcount'],
         Beatmap.PLAY_COUNT: beatmap_data['playcount'],
-        Beatmap.HT_STAR: ht_star,
-        Beatmap.DT_STAR: dt_star
     }
+    if mode == 'mania': # TODO: refactor it with mod_stars and mod_max_pp
+        old = repository.select_first(conn, Beatmap.TABLE_NAME,
+                                      project=[Beatmap.SUM_SCORES, Beatmap.HT_STAR, Beatmap.DT_STAR],
+                                      where={Beatmap.ID: beatmap_data['id']})
+        if old is None:
+            old_sum, ht_star, dt_star = 0, 0, 0
+        else:
+            old_sum, ht_star, dt_star = old
+        try:
+            ht_star, dt_star = ensure_beatmap_star(beatmap_data['id'], ht_star, dt_star)
+        except:
+            print(f"ensure_beatmap_star error in {beatmap_data['id']}!!!")
+        result.update({
+            Beatmap.SUM_SCORES: old_sum,
+            Beatmap.HT_STAR: ht_star,
+            Beatmap.DT_STAR: dt_star,
+        })
+    elif mode == 'osu':
+        old = repository.select_first(conn, Beatmap.TABLE_NAME,
+                                      project=[Beatmap.SUM_SCORES, Beatmap.MOD_STAR,
+                                               Beatmap.MOD_MAX_PP],
+                                      where={Beatmap.ID: beatmap_data['id']})
+        if old is None:
+            old_sum, mod_star, mod_max_pp = 0, {}, {}
+        else:
+            old_sum, mod_star, mod_max_pp = old
+            mod_star = json.loads(mod_star) if mod_star is not None else None
+            mod_max_pp = json.loads(mod_max_pp) if mod_max_pp is not None else None
+        try:
+            mod_star, mod_max_pp = ensure_beatmap_attributes(beatmap_data['id'], mod_star,
+                                                             mod_max_pp, mode)
+
+        except:
+            print(f"ensure_beatmap_attributes error in {beatmap_data['id']}!!!")
+            # raise
+        result.update({
+            Beatmap.SUM_SCORES: old_sum,
+            Beatmap.MOD_STAR: json.dumps(mod_star, separators=(',', ':')),
+            Beatmap.MOD_MAX_PP: json.dumps(mod_max_pp, separators=(',', ':')),
+        })
+    else:
+        raise NotImplemented
+
+
     return result
 
 
@@ -258,7 +334,7 @@ def fetch_user_ranking(game_mode, variant, max_page=10000, country=None):
                     old_pp = float(old[0])
                     old_dirty = old[1]
                 new_pp = float(user_data[User.PP])
-                user_data[User.DIRTY] = abs(old_pp - new_pp) > 0.1
+                user_data[User.DIRTY] = abs(old_pp - new_pp) > 1
                 if user_data[User.DIRTY]:
                     print(
                         f"[Dirty] {user_data[User.NAME]} - {user_data[User.ID]}: old = {old_pp}, new = {new_pp}")
@@ -320,7 +396,7 @@ def fetch_best_performance_for_user(game_mode, user_id, connection, enable_retry
     return beatmap_db_data, score_db_data
 
 
-def fetch_best_performance(game_mode, max_user=100000):
+def fetch_best_performance(game_mode, max_user=1000000):
     """
     fetch and save users' bp related data in table Score and table Beatmap
     @param game_mode:osu game mode
@@ -357,10 +433,10 @@ def fetch_best_performance(game_mode, max_user=100000):
     # conn.close()
 
 
-def fetch_ranked_beatmaps(mode_int, max_maps=100000):
+def fetch_ranked_beatmaps(mode_int, max_maps=1000000):
     """
     fetch and save ranked map related data in Table Beatmap
-    @param mode_int:a code name of osu game mode
+    @param mode_int: a code name of osu game mode
     @param max_maps: the number of fetching maps
     """
     progress_control = ProgressControl("fetch_ranked_beatmaps_%d_auth_2" % (mode_int), max_maps)
@@ -490,7 +566,35 @@ def insert_scores(conn, score_db_data):
     repository.insert_or_replace(conn, Score.TABLE_NAME, data, or_ignore=False)
 
 
-def post_process_db(user_id=None, conn=None):
+def post_process_db_std(user_id=None, conn=None):
+    """
+    fill up the blanks about Score.GAME_MODE, Score.CS
+    @param user_id:osu uid
+    @param conn:database connection
+    """
+    if conn is None:
+        conn = repository.get_connection()
+    with conn:
+        # insert game_mode and cs into Score
+        repository.ensure_column(conn, Score.TABLE_NAME, [
+            (Score.GAME_MODE, "TEXT", None),
+            (Score.CS, "INTEGER", None),
+        ])
+        if user_id is not None:
+            extra_cs = f" WHERE {Score.USER_ID} = {user_id}"
+        else:
+            extra_cs = ""
+        repository.execute_sql(conn,
+                               f"UPDATE {Score.TABLE_NAME} SET ({Score.GAME_MODE}, {Score.CS}) = "
+                               f"(SELECT {Beatmap.GAME_MODE}, {Beatmap.CS} "
+                               f"FROM {Beatmap.TABLE_NAME} "
+                               f"WHERE {Beatmap.TABLE_NAME}.{Beatmap.ID} == "
+                               f"{Score.TABLE_NAME}.{Score.BEATMAP_ID} "
+                               f") {extra_cs}")
+        # drop task table
+        repository.execute_sql(conn, f"DROP TABLE IF EXISTS {Task.TABLE_NAME}")
+
+def post_process_db_mania(user_id=None, conn=None):
     """
     fill up the blanks about Score.GAME_MODE, Score.CS(aka the number of columns in mania mode) and Score.CUSTOM_ACCURACY
     @param user_id:osu uid
@@ -537,39 +641,16 @@ def post_process_db(user_id=None, conn=None):
         repository.execute_sql(conn, f"DROP TABLE IF EXISTS {Task.TABLE_NAME}")
 
 
-def fetch():
-    """
-    integrate functions among fetch users' ranking, users' bp, ranked beatmaps and top scores of ranked beatmaps
-    """
-    with repository.get_connection() as conn_:
-        User.create(conn_)
-    Beatmap.create(conn_)
-    Score.create(conn_)
-    Task.create(conn_)
-
-    try:
-        for variant in ['4k', '7k']:
-            for country in [None, "CN", "US", "KR"]:
-                fetch_user_ranking(game_mode='mania', variant=variant, country=country)
-
-        fetch_ranked_beatmaps(3)
-        fetch_best_performance(game_mode='mania')
-        fetch_beatmap_top_scores(game_mode='mania', variant='4k')
-        fetch_beatmap_top_scores(game_mode='mania', variant='7k')
-        post_process_db()
-    except Exception as e:
-        print("ERROR: " + str(api.recent_request))
-        raise e
-
-
-def fetch_best_performance_for_user_online(uid, connection):
+def fetch_best_performance_for_user_online(config, uid, connection):
     """
     update table Beatmap and table Score in data according to personal osu bp
+    @param config: config
     @param uid: osu id
     @param connection: database connection
     @return: nothing
     """
-    beatmap_db_data, score_db_data = fetch_best_performance_for_user(game_mode='mania', user_id=uid,
+    beatmap_db_data, score_db_data = fetch_best_performance_for_user(game_mode=config.game_mode,
+                                                                     user_id=uid,
                                                                      connection=connection,
                                                                      enable_retry=False)
     if beatmap_db_data is None or score_db_data is None:
@@ -602,7 +683,6 @@ def update_single_user(connection, config: NetworkConfig, user_name=None, user_i
         }, enable_retry=False)
     if "error" in r:
         return False, None
-    user_id = r['id']
     user_data = {
         User.ID: r['id'],
         User.NAME: r['username'],
@@ -613,24 +693,102 @@ def update_single_user(connection, config: NetworkConfig, user_name=None, user_i
         User.COUNTRY: r['country']['name'],
         User.DIRTY: False
     }
-    for v in r['statistics']['variants']:
-        if v['mode'] != game_mode:
-            continue
-        user_variant_data = user_data.copy()
-        user_variant_data[User.VARIANT] = v['variant']
-        user_variant_data[User.PP] = v['pp']
-        if v['pp'] < 10:
-            continue
+
+    def process(u_data):
+        variant = u_data[User.VARIANT]
+        uid = u_data[User.ID]
         with connection:
-            repository.insert_or_replace(connection, User.TABLE_NAME, [user_variant_data])
+            repository.insert_or_replace(connection, User.TABLE_NAME, [u_data])
+        fetch_best_performance_for_user_online(config, uid, connection)
+        if game_mode == 'mania':
+            post_process_db_mania(uid, connection)
+        elif game_mode == 'osu':
+            post_process_db_std(uid, connection)
+        else:
+            raise
+        train_personal_embedding_online(config, f"{uid}-{game_mode}-{variant}", connection)
 
-        print(f"Fetching scores: ({v['variant']}) ...")
-        fetch_best_performance_for_user_online(r['id'], connection)
-        post_process_db(r['id'], connection)
+    if game_mode == 'mania':
+        for v in r['statistics']['variants']:
+            if v['mode'] != game_mode:
+                continue
+            user_variant_data = user_data.copy()
+            user_variant_data[User.VARIANT] = v['variant']
+            user_variant_data[User.PP] = v['pp']
+            if v['pp'] < 10:
+                continue
+            print(f"Fetching scores: ({v['variant']}) ...")
+            process(user_variant_data)
+    else:
+        user_data[User.VARIANT] = ""
+        user_data[User.PP] = r['statistics']['pp']
+        process(user_data)
 
-        train_personal_embedding_online(config, f"{r['id']}-{game_mode}-{v['variant']}", connection)
     return True, r['id']
 
+def fetch_mania():
+    """
+    integrate functions among fetch users' ranking, users' bp, ranked beatmaps and top scores of ranked beatmaps
+    """
+    with repository.get_connection() as conn_:
+        User.create(conn_)
+    Beatmap.create(conn_)
+    Score.create(conn_)
+    Task.create(conn_)
+
+    try:
+        for variant in ['4k', '7k']:
+            for country in [None, "CN", "US", "KR"]:
+                fetch_user_ranking(game_mode='mania', variant=variant, country=country)
+
+        fetch_ranked_beatmaps(3)
+        fetch_best_performance(game_mode='mania')
+        fetch_beatmap_top_scores(game_mode='mania', variant='4k')
+        fetch_beatmap_top_scores(game_mode='mania', variant='7k')
+        post_process_db_mania()
+    except Exception as e:
+        print("ERROR: " + str(api.recent_request))
+        raise e
+
+def fetch_std():
+    """
+    integrate functions among fetch users' ranking, users' bp, ranked beatmaps and top scores of ranked beatmaps
+    """
+    with repository.get_connection() as conn_:
+        User.create(conn_)
+        Beatmap.create(conn_)
+        Score.create(conn_)
+        Task.create(conn_)
+
+    try:
+        for country in [None, "US", "RU", "DE", "CA", "PL", "PH", "FR", "JP", "BR", "GB",
+                        "ID", "AU", "TW", "CL", "MY", "KR", "UA", "MX", "CN"]:
+            fetch_user_ranking(game_mode='osu', variant="", country=country)
+
+        fetch_ranked_beatmaps(0)
+        fetch_best_performance(game_mode='osu')
+        post_process_db_std()
+
+        conn = repository.get_connection()
+        for x in repository.select(conn, Beatmap.TABLE_NAME, [Beatmap.ID, Beatmap.MOD_STAR, Beatmap.MOD_MAX_PP]):
+            bid, mod_star, mod_max_pp = x
+            if mod_star == "{}":
+                mod_star, mod_max_pp = ensure_beatmap_attributes(bid, mod_star, mod_max_pp, "osu")
+                repository.update(conn, Beatmap.TABLE_NAME, [{
+                    Beatmap.MOD_STAR: json.dumps(mod_star, separators=(',', ':')),
+                    Beatmap.MOD_MAX_PP: json.dumps(mod_max_pp, separators=(',', ':')),
+                }], [{
+                    Beatmap.ID: bid
+                }])
+                print(bid, mod_star, mod_max_pp)
+                conn.commit()
+
+    except Exception as e:
+        print("ERROR: " + str(api.recent_request))
+        raise e
 
 if __name__ == "__main__":
-    fetch()
+    conn = repository.get_connection()
+    config = NetworkConfig.from_config("config/osu.json")
+    update_single_user(conn, config, user_name="linya0768")
+    # update_single_user(conn, config, user_name="[Crz]Caicium")
