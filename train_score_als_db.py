@@ -207,6 +207,7 @@ def train_personal_embedding_online(config: NetworkConfig, key, connection):
         embedding = weights.user_embedding.embeddings[0][
             weights.user_embedding.key_to_embed_id[user_key]
         ]
+        embedding = np.copy(embedding)
         embedding = np.reshape(embedding, (1, -1))
         with open(config.ball_tree_path, 'rb') as f:
             nbrs, user_ids, first_variant = pickle.load(f)
