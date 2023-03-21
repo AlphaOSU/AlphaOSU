@@ -339,6 +339,7 @@ class NetworkConfig:
     @staticmethod
     def from_config(config_file):
         config = json.load(open(config_file))
+        print("Load config:", config)
         return NetworkConfig(config)
 
     def __init__(self, data_dict=None):
@@ -350,7 +351,7 @@ class NetworkConfig:
         self.pp_weight_clip = data_dict.get('pp_weight_clip', 10)
         self.pass_band_width = data_dict.get('pass_band_width', 1)
         self.pass_basic_weight_played = data_dict.get('pass_basic_weight_played', 0.7)
-        self.pass_power = data_dict.get('pass_basic_weight_neighbor_played', 0.8)
+        self.pass_power = data_dict.get('pass_power', 0.8)
         self.ball_tree_path = data_dict.get('ball_tree_path', 'ball-tree.pkl')
 
     def get_embedding_names(self, name, is_sigma=False, is_alpha=False):

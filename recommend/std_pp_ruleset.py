@@ -29,6 +29,7 @@ class STDPP(PPRuleSet):
         probable_pps, break_probs, \
         pp_gains, true_pps, pass_probs, true_score_ids = [], [], [], [], [], []
         true_mods = []
+        true_scores = []
         stars = []
         pass_feature_list = defaultdict(lambda: [])
         pass_feature_list_index = defaultdict(lambda: [])
@@ -44,7 +45,7 @@ class STDPP(PPRuleSet):
             pass_feature_list[pass_feature_key].append(bid)
             pass_feature_list_index[pass_feature_key].append(i)
             # break prob
-            true_mod, true_pp, _, true_star, true_score_id = user_bp.get_score_pp(bid)
+            true_mod, true_score, true_pp, true_star, true_score_id = user_bp.get_score_pp(bid)
             if true_pp is None:
                 break_prob = 1.0
                 probable_pp = pred_pp
@@ -59,6 +60,7 @@ class STDPP(PPRuleSet):
                     break_prob = 1.0
                 else:
                     pp_train, pp_std_train = std_result
+                    pp_std_train = pp_std_train * 3
                     true_pp_train = osu_utils.map_osu_pp(true_pp, real_to_train=True, max_pp=max_pp)
                     break_prob = 1 - stats.norm.cdf(true_pp_train, loc=pp_train,
                                                     scale=pp_std_train)
@@ -66,11 +68,13 @@ class STDPP(PPRuleSet):
                         integrate.quad(pp_with_prob, a=true_pp_train, b=np.inf,
                                        args=(pp_train, pp_std_train, max_pp),
                                        epsabs=1.0)[0] / break_prob
+                    probable_pp = probable_pp * 0.5 + pred_pp * 0.5
             true_pps.append(true_pp)
             probable_pps.append(probable_pp)
             break_probs.append(round(break_prob, 6))
             stars.append(star)
             true_mods.append(true_mod)
+            true_scores.append(true_score)
             true_score_ids.append(int(true_score_id) if true_score_id is not None else None)
             # pp gain
             if probable_pp is not None:
@@ -109,6 +113,7 @@ class STDPP(PPRuleSet):
         data["pass_prob"] = pass_probs
         data["pp_gain (breaking)"] = pp_gains
         data['true_pp'] = true_pps
+        data['true_score'] = true_scores
         data['true_score_id'] = true_score_ids
         data['true_mod'] = true_mods
         data['pp_gain_expect'] = data['pp_gain (breaking)'] * data['break_prob'] * data['pass_prob']
@@ -121,7 +126,8 @@ class STDPP(PPRuleSet):
                                      'break_prob',
                                      'pp_gain (breaking)', 'pass_prob', 'set_id',
                                      'valid_count',
-                                     'pp_gain_expect', 'true_score_id', 'true_mod'])
+                                     'pp_gain_expect', 'true_score_id', 'true_mod', 
+                                     'true_score'])
         data.sort_values(by="pp_gain_expect", ascending=False, inplace=True)
         return data
 
@@ -161,8 +167,6 @@ class STDPP(PPRuleSet):
             mod_int = osu_utils.mods_to_db_key(required_mods)
             max_pp = json.loads(mod_max_pp)[mod_int]
             pred_pp = osu_utils.map_osu_pp(pp_ratio, real_to_train=False, max_pp=max_pp)
-            if pred_pp < min_pp:
-                continue
             star = json.loads(mod_star)[mod_int]
             count = count_dt if speed == 1 else count_nm
             if max_star is not None:
@@ -170,7 +174,7 @@ class STDPP(PPRuleSet):
                     continue
             if star < min_star:
                 continue
-            if count < 10:
+            if count_dt + count_nm < self.config.embedding_size:
                 continue
             data_list.append([bid, mod_int, star, max_pp, 0, pred_pp, self.map_beatmap_name(name, version),
                               speed, set_id, count])

@@ -67,6 +67,7 @@ class ManiaPP(PPRuleSet):
                         integrate.quad(score_with_prob, a=true_score_train, b=np.inf,
                                        args=(score_train, score_std_train),
                                        epsabs=1.0)[0] / break_prob
+                    probable_score = probable_score * 0.7 + pred_score * 0.3
             true_scores.append(true_score)
             true_pps.append(true_pp)
             true_speeds.append(true_speed)

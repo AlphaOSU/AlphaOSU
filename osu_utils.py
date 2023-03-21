@@ -304,7 +304,8 @@ def get_user_bp(connection, user_id,
         return user_bp
     elif config.game_mode == 'osu':
         sql = (f"SELECT Beatmap.id, Score.PP, Score.{Score.SCORE_ID}, Beatmap.{Beatmap.MOD_STAR}, "
-                f"Score.{Score.IS_DT}, Score.{Score.IS_HD}, Score.{Score.IS_HR} "
+                f"Score.{Score.IS_DT}, Score.{Score.IS_HD}, Score.{Score.IS_HR}, "
+                f"Score.{Score.SCORE} "
                 f"FROM Score "
                 f"JOIN Beatmap ON Score.beatmap_id == Beatmap.id "
                 f'WHERE Score.user_id == "{user_id}" ' 
@@ -315,10 +316,10 @@ def get_user_bp(connection, user_id,
         cursor = list(repository.execute_sql(connection, sql).fetchall())
         user_bp = BestPerformance(max_length)
         for tuple in cursor[::-1]:
-            bid, pp, score_id, mod_star, is_dt, is_hd, is_hr = tuple
+            bid, pp, score_id, mod_star, is_dt, is_hd, is_hr, score = tuple
             mod_int = bools_to_db_key(is_dt, is_hr, is_hd)
             star = json.loads(mod_star)[mod_int]
-            user_bp.update(int(bid), mod_int, pp, pp, star, score_id=score_id)  # , embeddings)
+            user_bp.update(int(bid), mod_int, score, pp, star, score_id=score_id)  # , embeddings)
         return user_bp
     else:
         raise NotImplemented

@@ -132,7 +132,7 @@ class PPRecommender:
 
         data: pd.DataFrame = data.iloc[:max_size, :]
         data.set_index(['id', 'mod'], inplace=True)
-        print(len(data))
+        print("recall length:", len(data))
         return data
 
     def rank(self, uid, data: pd.DataFrame, user_bp: BestPerformance):

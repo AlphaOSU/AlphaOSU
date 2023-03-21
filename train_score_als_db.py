@@ -329,7 +329,7 @@ def train_score_by_als(config: NetworkConfig, connection: sqlite3.Connection):
         for beatmap_key in pbar:
             train_embedding(beatmap_key, provide_beatmap_data, epoch, config,
                             weights.beatmap_embedding, statistics, pbar, weights.user_embedding,
-                            weights.mod_embedding)
+                            weights.mod_embedding, cachable=False)
         tqdm.write(pbar.desc)
 
         # train user
@@ -338,7 +338,7 @@ def train_score_by_als(config: NetworkConfig, connection: sqlite3.Connection):
         for user_key in pbar:
             train_embedding(user_key, provide_user_data, epoch, config,
                             weights.user_embedding, statistics, pbar, weights.beatmap_embedding,
-                            weights.mod_embedding)
+                            weights.mod_embedding, cachable=False)
         tqdm.write(pbar.desc)
 
         cur_r2 = mean(statistics.r2_adj_list)
