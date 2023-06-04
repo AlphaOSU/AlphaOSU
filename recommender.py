@@ -207,7 +207,7 @@ def test_mania():
     import matplotlib.pyplot as plt
 
     uid = sys.argv[-1]
-    config = NetworkConfig.from_config("mania.json")
+    config = NetworkConfig.from_config("config/mania.json")
 
     connection = repository.get_connection()
     recommender = PPRecommender(config, connection, rule=4)
@@ -281,5 +281,5 @@ def test_std():
 
 
 if __name__ == "__main__":
-    # test_mania()
-    test_std()
+    test_mania()
+    # test_std()
