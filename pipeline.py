@@ -54,10 +54,19 @@ def register_log_output(name):
 if __name__ == "__main__":
     config_path = sys.argv[-1]
     config = NetworkConfig.from_config(config_path)
+    deploy_db_file = os.path.join("result", "data_deploy.db")
+    backup_db_file = os.path.join("result", "data.db.gz")
+    training_db_file = os.path.join("result", "data.db")
 
     try:
         # First, remove the log dir
         shutil.rmtree(os.path.join("result", "log"), ignore_errors=True)
+
+        # Backup old database to avoid accidents.
+        print("Backup")
+        if os.path.isfile(training_db_file):
+            with open(training_db_file, "rb") as fin, gzip.open(backup_db_file, "wb") as fout:
+                shutil.copyfileobj(fin, fout)
 
         # Second, fetch data
         register_log_output("data_fetch")
@@ -92,24 +101,14 @@ if __name__ == "__main__":
             print("VACCUM")
             conn.execute("VACUUM")
 
-
-            deploy_db_file = os.path.join("result", "data_deploy.db")
-            backup_db_file = os.path.join("result", "data_deploy_backup.tar.gz")
-            training_db_file = os.path.join("result", "data.db")
-
-            # Backup old database to avoid accidents.
-            print("Backup")
-            if os.path.isfile(deploy_db_file):
-                with open(deploy_db_file, "rb") as fin, gzip.open(backup_db_file, "wb") as fout:
-                    shutil.copyfileobj(fin, fout)
+            print("Copy back")
+            # copy back database for the next training
+            shutil.copyfile(training_db_file, training_db_file + "_tmp")
 
             print("Deploy")
             # Fast deploy by directly moving
             shutil.move(training_db_file, deploy_db_file)
-            
-            print("Copy back")
-            # copy back database for the next training
-            shutil.copyfile(os.path.join("result", "data_deploy.db"), os.path.join("result", "data.db"))
+            shutil.move(training_db_file + "_tmp", training_db_file)
 
             try:
                 from post_process import finish

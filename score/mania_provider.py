@@ -59,10 +59,22 @@ class ManiaScoreDataProvider(BaseScoreDataProvider):
             return None
         if len(scores) == 0:
             return None
+        
+        # only train top-200 beatmaps
+        pp_sorted_list = sorted(pps, reverse=True)
+        if len(pp_sorted_list) >= 200:
+            min_pp = pp_sorted_list[199]
+        else:
+            min_pp = 0
         pps = np.asarray(pps)
 
         regression_weights = np.clip(pps / np.mean(pps), 1 / self.config.pp_weight_clip,
                                      self.config.pp_weight_clip)
+        regression_weights = np.where(
+            pps >= min_pp,
+            regression_weights, 
+            regression_weights / 100
+        )
         return (np.asarray(scores, dtype=np.float32),
                 np.asarray(beatmap_emb_id, dtype=np.int32),
                 np.asarray(mod_emb_id, dtype=np.int32),
