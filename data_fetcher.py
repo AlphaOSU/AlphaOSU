@@ -137,7 +137,7 @@ def parse_beatmap_data(beatmap_data, beatmapset_data, conn: sqlite3.Connection, 
             old_sum, ht_star, dt_star = old
         try:
             ht_star, dt_star = ensure_beatmap_star(beatmap_data['id'], ht_star, dt_star)
-        except:
+        except Exception:
             print(f"ensure_beatmap_star error in {beatmap_data['id']}!!!")
         result.update({
             Beatmap.SUM_SCORES: old_sum,
@@ -159,7 +159,7 @@ def parse_beatmap_data(beatmap_data, beatmapset_data, conn: sqlite3.Connection, 
             mod_star, mod_max_pp = ensure_beatmap_attributes(beatmap_data['id'], mod_star,
                                                              mod_max_pp, mode)
 
-        except:
+        except Exception:
             print(f"ensure_beatmap_attributes error in {beatmap_data['id']}!!!")
             # raise
         result.update({

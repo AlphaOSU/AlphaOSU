@@ -82,7 +82,7 @@ def create_index(conn: sqlite3.Connection, index_name: str, table_name: str, col
     )
     try:
         execute_sql(conn, sql)
-    except:
+    except Exception:
         pass
 
 

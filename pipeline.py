@@ -119,7 +119,7 @@ if __name__ == "__main__":
 
             print("Finish!")
 
-    except:
+    except Exception:
         import traceback
         traceback.print_exc(file=sys.stdout)
 
