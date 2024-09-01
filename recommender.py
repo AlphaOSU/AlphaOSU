@@ -141,19 +141,16 @@ class PPRecommender:
     def predict(self, uid, key_count, beatmap_ids=[], max_star=None, max_size=300, min_star=0,
                 min_pp=None, required_mods=None):
 
-        st = time.time()
-        user_bp = self.pp_rule_set.user_bp(uid)
-        print(f"BP: {time.time() - st}")
+        with self.pp_rule_set.timing("[Get-BP]"):
+            user_bp = self.pp_rule_set.user_bp(uid)
         if len(user_bp.data) == 0:
             return None
 
-        st = time.time()
-        data = self.recall(uid, key_count, beatmap_ids, max_star, max_size, min_star, required_mods, min_pp)
-        print(f"Recall time: {time.time() - st}")
+        with self.pp_rule_set.timing("[Recall-total]"):
+            data = self.recall(uid, key_count, beatmap_ids, max_star, max_size, min_star, required_mods, min_pp)
 
-        st = time.time()
-        data = self.rank(uid, data, user_bp)
-        print(f"Rank time: {time.time() - st}")
+        with self.pp_rule_set.timing("[Rank-total]"):
+            data = self.rank(uid, data, user_bp)
         return data
 
     def draw_prediction_distribution_diagram(self, user_id, variant, beatmap_id, mod):

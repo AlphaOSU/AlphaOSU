@@ -41,7 +41,7 @@ class PPRuleSet():
         return Timer(self.profile, name)
 
     def export_profile(self):
-        content = "===================="
+        content = "====================\n"
         for name, duration in self.profile.items():
             content += (f"{name}: {duration:.3f} s\n")
         content += "===================="
