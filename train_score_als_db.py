@@ -160,7 +160,7 @@ def train_personal_embedding(key, weights, config, connection,
     @return: length of score, for counting how many scores are used for training user embedding
     """
     if config.game_mode == 'osu':
-        provider = STDScoreDataProvider(weights, config, connection)
+        provider = STDScoreDataProvider(weights, config, connection, online=True)
     elif config.game_mode == 'mania':
         provider = ManiaScoreDataProvider(weights, config, connection)
     else:
