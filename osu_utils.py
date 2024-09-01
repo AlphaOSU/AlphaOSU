@@ -7,13 +7,14 @@ import subprocess
 import json
 
 
-def invoke_osu_tools(beatmap_path, dt_star=False, ht_star=False):
+def invoke_osu_tools(beatmap_path, dt_star=False, ht_star=False, nm_star=False):
     """
     Invoke osu tools for sr calculation.
     See https://github.com/ppy/osu-tools/ for more details.
     @param beatmap_path: beatmap_path
     @param dt_star: if return DT sr only
     @param ht_star: if return HT sr only
+    @param nm_star: if return NM sr only
     @return: result
     """
     cmd = list(api.get_secret_value("osu_tools_command", []))
@@ -24,7 +25,7 @@ def invoke_osu_tools(beatmap_path, dt_star=False, ht_star=False):
     elif ht_star:
         cmd.extend(["-m", "HT"])
     result = json.loads(subprocess.check_output(cmd))
-    if dt_star or ht_star:
+    if dt_star or ht_star or nm_star:
         return result['results'][0]['attributes']['star_rating']
     return result
 

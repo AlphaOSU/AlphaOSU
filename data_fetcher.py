@@ -13,7 +13,7 @@ from data.model import *
 import subprocess
 
 
-def ensure_beatmap_star(beatmap_id, ht_star, dt_star):
+def ensure_beatmap_star(beatmap_id, ht_star, dt_star, star):
     """
     @deprecated use ensure_beatmap_attributes instead
 
@@ -21,10 +21,11 @@ def ensure_beatmap_star(beatmap_id, ht_star, dt_star):
     @param beatmap_id: the id of beatmap in osu
     @param ht_star:the star of beatmap with HT mod
     @param dt_star:the star of beatmap with DT mod
+    @param star:the star of beatmap
     @return:ht_star and dt_star
     """
-    if ht_star != 0 and dt_star != 0:
-        return ht_star, dt_star
+    if ht_star != 0 and dt_star != 0 and star != 0:
+        return ht_star, dt_star, star
     osu_website = api.get_secret_value("osu_website", api.OSU_WEBSITE)
     r = api.request_api(f"osu/{beatmap_id}", "GET", osu_website, json=False)
     base_cache = os.path.join("result", "cache")
@@ -38,10 +39,12 @@ def ensure_beatmap_star(beatmap_id, ht_star, dt_star):
         ht_star = osu_utils.invoke_osu_tools(beatmap_path, ht_star=True)
     if dt_star == 0:
         dt_star = osu_utils.invoke_osu_tools(beatmap_path, dt_star=True)
+    if star == 0:
+        star = osu_utils.invoke_osu_tools(beatmap_path, nm_star=True)
 
     os.remove(beatmap_path)
-    print(f"Calculate star: {beatmap_id}, ht = {ht_star}, dt = {dt_star}")
-    return ht_star, dt_star
+    print(f"Calculate star: {beatmap_id}, ht = {ht_star}, dt = {dt_star}, nm = {star}")
+    return ht_star, dt_star, star
 
 
 def ensure_beatmap_attributes(beatmap_id, mod_stars, mod_max_pp, mode):
@@ -129,20 +132,21 @@ def parse_beatmap_data(beatmap_data, beatmapset_data, conn: sqlite3.Connection, 
     }
     if mode == 'mania': # TODO: refactor it with mod_stars and mod_max_pp
         old = repository.select_first(conn, Beatmap.TABLE_NAME,
-                                      project=[Beatmap.SUM_SCORES, Beatmap.HT_STAR, Beatmap.DT_STAR],
+                                      project=[Beatmap.SUM_SCORES, Beatmap.HT_STAR, Beatmap.DT_STAR, Beatmap.STAR],
                                       where={Beatmap.ID: beatmap_data['id']})
         if old is None:
-            old_sum, ht_star, dt_star = 0, 0, 0
+            old_sum, ht_star, dt_star, star = 0, 0, 0, 0
         else:
-            old_sum, ht_star, dt_star = old
+            old_sum, ht_star, dt_star, star = old
         try:
-            ht_star, dt_star = ensure_beatmap_star(beatmap_data['id'], ht_star, dt_star)
+            ht_star, dt_star, star = ensure_beatmap_star(beatmap_data['id'], ht_star, dt_star, star)
         except:
             print(f"ensure_beatmap_star error in {beatmap_data['id']}!!!")
         result.update({
             Beatmap.SUM_SCORES: old_sum,
             Beatmap.HT_STAR: ht_star,
             Beatmap.DT_STAR: dt_star,
+            Beatmap.STAR: star
         })
     elif mode == 'osu':
         old = repository.select_first(conn, Beatmap.TABLE_NAME,
@@ -501,7 +505,7 @@ def fetch_beatmap_top_scores(game_mode, variant, max_beatmap=100000):
         dirty = True
         for mods in ['', 'DT', 'HT']:
             for type in ['global', 'country']:
-                if dirty or random.random() > 0.9:
+                if dirty and random.random() > 0.5:
                     data = api.request_auth_api(
                         'beatmaps/{beatmap}/scores'.format(beatmap=beatmap_id),
                         'GET',
@@ -515,7 +519,7 @@ def fetch_beatmap_top_scores(game_mode, variant, max_beatmap=100000):
                 else:
                     score_db_data = None
                 # check dirty
-                if j == 0:
+                if j == 0 and score_db_data is not None:
                     cur_sum_scores = sum(map(lambda x: x[Score.SCORE], score_db_data))
                     if cur_sum_scores == sum_scores:
                         dirty = False
@@ -788,7 +792,9 @@ def fetch_std():
         raise e
 
 if __name__ == "__main__":
-    conn = repository.get_connection()
-    config = NetworkConfig.from_config("config/osu.json")
-    update_single_user(conn, config, user_name="linya0768")
-    # update_single_user(conn, config, user_name="[Crz]Caicium")
+    with repository.get_connection() as conn_:
+        User.create(conn_)
+    Beatmap.create(conn_)
+    Score.create(conn_)
+    Task.create(conn_)
+    fetch_ranked_beatmaps(3)
