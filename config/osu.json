@@ -2,8 +2,9 @@
     "game_mode": "osu",
     "embedding_size": 20,
     "pp_weight_clip": 10,
-    "pass_band_width": 50,
+    "pass_band_width": 1.2,
     "pass_basic_weight_played": 0.7,
     "pass_power": 0.5,
-    "ball_tree_path": "result/ball-tree-std.pkl"
+    "ball_tree_path": "result/ball-tree-std.pkl",
+    "ball_tree_path_train": "result/ball-tree-std-train.pkl"
 }

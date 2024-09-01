@@ -1,3 +1,7 @@
+import os
+os.environ['SQLITE_TMPDIR'] = "./result/tmp/"
+os.environ['TMPDIR'] = "./result/tmp/"
+
 import gzip
 import shutil
 import sys
@@ -109,6 +113,7 @@ if __name__ == "__main__":
             # Fast deploy by directly moving
             shutil.move(training_db_file, deploy_db_file)
             shutil.move(training_db_file + "_tmp", training_db_file)
+            shutil.move(config.ball_tree_path_train, config.ball_tree_path)
 
             try:
                 from post_process import finish
@@ -119,7 +124,7 @@ if __name__ == "__main__":
 
             print("Finish!")
 
-    except:
+    except Exception:
         import traceback
         traceback.print_exc(file=sys.stdout)
 

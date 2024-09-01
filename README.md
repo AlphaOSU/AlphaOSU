@@ -27,17 +27,18 @@ pip install -r requirements.txt
 
 ```json
 {
-    "client_id": "<client_id>",
-    "client_secret": "<client_secret>",
-    "redirect_uri": "<redirect_uri>",
-    "scope": "public",
-    "osu_website": "https://osu.ppy.sh/",
-    "osu_tools_command": [
-        "dotnet",
-        "run", 
-        "--project", 
-        "<path to osu_tools>/PerformanceCalculator"
-    ]
+  "oauth_url": "<oauth_url>",
+  "client_id": "<client_id>",
+  "client_secret": "<client_secret>",
+  "redirect_uri": "<redirect_uri>",
+  "scope": "public",
+  "osu_website": "https://osu.ppy.sh/",
+  "osu_tools_command": [
+    "dotnet",
+    "run",
+    "--project",
+    "<path to osu_tools>/PerformanceCalculator"
+  ]
 }
 ```
 

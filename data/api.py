@@ -2,6 +2,7 @@ import json
 import requests
 import os
 import time
+from urllib.parse import urljoin
 
 session = None
 recent_request = None
@@ -49,8 +50,8 @@ def request_api(api, method, end_point=None, params=None, header=None, retry_cou
         header = {}
     if end_point is None:
         end_point = get_secret_value("osu_website", OSU_WEBSITE)
-        end_point = end_point + "api/v2/"
-    url = end_point + api
+        end_point = urljoin(end_point, "api/v2/")
+    url = urljoin(end_point, api)
     global session, recent_request, recent_request_time, REQUEST_MIN_INTERVAL
     if session is None:
         session = requests.Session()
@@ -118,8 +119,9 @@ def get_access_token():
         refresh_token = auth_data.get('refresh_token', None)
         if refresh_token is None:
             # auth first
-            # webbrowser.open("http://keytoix.vip/mania/api/osu-oauth")
-            print("http://keytoix.vip/mania/api/osu-oauth")
+            if (oauth_url := get_secret_value('oauth_url')) is None:
+                raise ValueError("Please set oauth_url in secret.json")
+            print(oauth_url)
             code = input("Please open the above url, and paste the code: ")
             auth_data = auth({'grant_type': 'authorization_code', 'code': code}, auth_cache_name)
         else:

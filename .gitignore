@@ -8,3 +8,5 @@ __pycache__
 DMatrix-
 secret.json
 post_process.py
+daily_run.py
+daily_run.sh

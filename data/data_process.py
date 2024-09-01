@@ -50,7 +50,8 @@ def load_embedding(table_name, primary_keys, embedding_name, config: NetworkConf
     key_to_embed_id = {}
     if initializer is None:
         def initializer(primary_values):
-            arr = (np.random.random((embedding_size,)) + 0.1) * np.sign(np.random.random((embedding_size,)) - 0.5)
+            # arr = (np.random.random((embedding_size,)) + 0.1) * np.sign(np.random.random((embedding_size,)) - 0.5)
+            arr = np.random.randn(embedding_size)
             # arr = arr / np.linalg.norm(arr)
             # arr[-1] = 0.5 / embedding_size
             return arr
@@ -190,7 +191,7 @@ def load_beatmap_embedding_online(table_name, primary_keys, embedding_name, conf
 
 
 def save_embedding(conn, embedding: EmbeddingData, config: NetworkConfig,
-                   table_name: str, embedding_name: str):
+                   table_name: str, embedding_name: str, batch_size: int=1024):
     """
     Save embedding into database. Please use it with load_embedding
     :param conn: database connection
@@ -198,6 +199,7 @@ def save_embedding(conn, embedding: EmbeddingData, config: NetworkConfig,
     :param config: training config
     :param table_name: table name
     :param embedding_name: base embedding column name
+    :param batch_size: size of each batch to insert
     :return: nothing
     """
     puts = []
@@ -233,8 +235,12 @@ def save_embedding(conn, embedding: EmbeddingData, config: NetworkConfig,
             })
         else:
             raise ValueError(table_name)
-
-    repository.update(conn, table_name=table_name, puts=puts, wheres=wheres)
+        if len(puts) >= batch_size:
+            repository.update(conn, table_name=table_name, puts=puts, wheres=wheres)
+            puts = []
+            wheres = []
+    if len(puts) > 0:
+        repository.update(conn, table_name=table_name, puts=puts, wheres=wheres)
 
 
 @measure_time

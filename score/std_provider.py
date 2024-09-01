@@ -1,4 +1,5 @@
 import json
+import random
 
 import osu_utils
 from score.provider import *
@@ -24,6 +25,28 @@ class STDScoreDataProvider(BaseScoreDataProvider):
         self.dirty_user = set()
         self.dirty_beatmap = set()
 
+        # create Score_b sorted by beatmap
+        with connection:
+            print("Create Score_b")
+            connection.execute("DROP TABLE IF EXISTS Score_b")
+            connection.execute(f"CREATE TABLE Score_b as "
+                               f"SELECT {Score.USER_ID}, {Score.BEATMAP_ID}, "
+                               f"{Score.PP}, {Score.IS_DT}, {Score.IS_HR}, {Score.IS_HD} from {Score.TABLE_NAME} "
+                               f"WHERE NOT {Score.IS_EZ} AND NOT {Score.IS_FL} AND NOT {Score.IS_HT} "
+                               f"ORDER BY ({Score.BEATMAP_ID} / 1000)")
+            print("Index Score_b")
+            repository.create_index(connection, "score_b_beatmap", "Score_b", [Score.BEATMAP_ID])
+
+            print("Create Score_u")
+            connection.execute("DROP TABLE IF EXISTS Score_u")
+            connection.execute(f"CREATE TABLE Score_u as "
+                               f"SELECT {Score.USER_ID}, {Score.BEATMAP_ID}, "
+                               f"{Score.PP}, {Score.IS_DT}, {Score.IS_HR}, {Score.IS_HD} from {Score.TABLE_NAME} "
+                               f"WHERE NOT {Score.IS_EZ} AND NOT {Score.IS_FL} AND NOT {Score.IS_HT} "
+                               f"ORDER BY ({Score.USER_ID} / 1000)")
+            print("Index Score_u")
+            repository.create_index(connection, "score_u_user", "Score_u", [Score.USER_ID])
+
     def get_mod_int(self, is_dt, is_hr, is_hd):
         mod_int = 0
         if is_dt:
@@ -40,11 +63,10 @@ class STDScoreDataProvider(BaseScoreDataProvider):
             return None
         sql = (
             f"SELECT {Score.BEATMAP_ID}, {Score.PP}, {Score.IS_DT}, {Score.IS_HR}, {Score.IS_HD} "
-            f"FROM {Score.TABLE_NAME} "
+            f"FROM {Score.TABLE_NAME}_u "
             f"WHERE {Score.USER_ID} == {user_id} "
-            f"AND {Score.GAME_MODE} == '{self.config.game_mode}' "
             f"AND {Score.PP} >= 1 "
-            f"AND NOT {Score.IS_EZ} AND NOT {Score.IS_FL} AND NOT {Score.IS_HT}"
+            # f"AND NOT {Score.IS_EZ} AND NOT {Score.IS_FL} AND NOT {Score.IS_HT}"
         )
         mod_emb_id = []
         beatmap_emb_id = []
@@ -52,14 +74,14 @@ class STDScoreDataProvider(BaseScoreDataProvider):
         for x in repository.execute_sql(self.connection, sql):
             bid, pp, is_dt, is_hr, is_hd = x
             mod_int = self.get_mod_int(is_dt, is_hr, is_hd)
-            max_pp = self.beatmap_max_pp[bid][mod_int]
-            # assert pp <= max_pp, f"PP = {pp}, mod = {mod_int}, but max_pp is {self.beatmap_max_pp[bid]}"
-            pp = osu_utils.map_osu_pp(pp, real_to_train=True, max_pp=max_pp)
-
             if str(bid) not in self.weights.beatmap_embedding.key_to_embed_id:
                 continue
             if int(bid) in self.dirty_beatmap:
                 continue
+            max_pp = self.beatmap_max_pp[int(bid)][mod_int]
+            # assert pp <= max_pp, f"PP = {pp}, mod = {mod_int}, but max_pp is {self.beatmap_max_pp[bid]}"
+            pp = osu_utils.map_osu_pp(pp, real_to_train=True, max_pp=max_pp)
+
             bid_emb = self.weights.beatmap_embedding.key_to_embed_id[str(bid)]
 
             beatmap_emb_id.append(bid_emb)
@@ -85,19 +107,19 @@ class STDScoreDataProvider(BaseScoreDataProvider):
 
     def provide_beatmap_data(self, beatmap_key: str, epoch, ignore_less=True):
         sql = (
-            f"SELECT {Score.USER_ID}, {Score.PP}, {Score.SCORE_ID}, "
+            f"SELECT {Score.USER_ID}, {Score.PP}, "
             f"{Score.IS_DT}, {Score.IS_HR}, {Score.IS_HD} "
-            f"FROM {Score.TABLE_NAME} "
+            f"FROM {Score.TABLE_NAME}_b "
             f"WHERE {Score.BEATMAP_ID} == {beatmap_key} "
-            # f"AND {Score.GAME_MODE} == '{self.config.game_mode}' "
             f"AND {Score.PP} >= 1 "
-            f"AND NOT {Score.IS_EZ} AND NOT {Score.IS_FL} AND NOT {Score.IS_HT}")
+            # f"AND NOT {Score.IS_EZ} AND NOT {Score.IS_FL} AND NOT {Score.IS_HT} "
+        )
         mod_emb_id = []
         user_emb_id = []
         pps = []
         mod_max_pp = self.beatmap_max_pp[int(beatmap_key)]
         for x in repository.execute_sql(self.connection, sql):
-            uid, pp, score_id, is_dt, is_hr, is_hd = x
+            uid, pp, is_dt, is_hr, is_hd = x
             mod_int = self.get_mod_int(is_dt, is_hr, is_hd)
             if mod_int not in mod_max_pp:
                 continue
@@ -138,7 +160,8 @@ class STDScoreDataProvider(BaseScoreDataProvider):
             f"AND {Score.IS_HD} == {int(is_hd)} "
             f"AND {Score.GAME_MODE} == '{self.config.game_mode}' "
             f"AND {Score.PP} >= 1 "
-            f"AND NOT {Score.IS_EZ} AND NOT {Score.IS_FL} AND NOT {Score.IS_HT} ")
+            f"AND NOT {Score.IS_EZ} AND NOT {Score.IS_FL} AND NOT {Score.IS_HT} "
+        )
         sql += f"AND {Score.SCORE_ID} % 30 == {epoch}"
         pps = []
         beatmap_emb_id = []
@@ -165,3 +188,9 @@ class STDScoreDataProvider(BaseScoreDataProvider):
                 np.asarray(user_emb_id, dtype=np.int32),
                 np.asarray(beatmap_emb_id, dtype=np.int32),
                 None)
+
+
+    def on_finish(self):
+        print("On finish! Remove Score_b & Score_u")
+        self.connection.execute("DROP TABLE IF EXISTS Score_b")
+        self.connection.execute("DROP TABLE IF EXISTS Score_u")

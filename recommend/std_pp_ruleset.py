@@ -102,7 +102,6 @@ class STDPP(PPRuleSet):
         if len(playable_stars) > 0:
             stars = np.asarray(stars)
             max_playable_stars = np.percentile(playable_stars, q=90)
-            print(max_playable_stars)
             # if star < max_playable_star, add 20% pass prob.
             # if max_playable_star < star < max_playable_star + 0.2, add a decaying pass prob.
             pass_complement = 1 - np.clip((stars - max_playable_stars) / 0.2, 0, 1)

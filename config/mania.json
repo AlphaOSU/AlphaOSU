@@ -2,8 +2,9 @@
     "game_mode": "mania",
     "embedding_size": 15,
     "pp_weight_clip": 10,
-    "pass_band_width": 1,
+    "pass_band_width": 1.2,
     "pass_basic_weight_played": 0.7,
-    "pass_power": 0.65,
-    "ball_tree_path": "result/ball-tree-mania.pkl"
+    "pass_power": 0.5,
+    "ball_tree_path": "result/ball-tree-mania.pkl",
+    "ball_tree_path_train": "result/ball-tree-mania-train.pkl"
 }

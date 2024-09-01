@@ -170,8 +170,8 @@ class Score:
     CUSTOM_ACCURACY = "custom_accuracy"
 
     @staticmethod
-    def create(conn: sqlite3.Connection):
-        repository.create_table(conn, table_name=Score.TABLE_NAME, columns={
+    def create(conn: sqlite3.Connection, table_name=TABLE_NAME):
+        repository.create_table(conn, table_name=table_name, columns={
             Score.BEATMAP_ID: "INTEGER NOT NULL",
             Score.USER_ID: "INTEGER NOT NULL",
             Score.SCORE_ID: "INTEGER NOT NULL",
@@ -353,6 +353,7 @@ class NetworkConfig:
         self.pass_basic_weight_played = data_dict.get('pass_basic_weight_played', 0.7)
         self.pass_power = data_dict.get('pass_power', 0.8)
         self.ball_tree_path = data_dict.get('ball_tree_path', 'ball-tree.pkl')
+        self.ball_tree_path_train = data_dict.get('ball_tree_path_train', 'ball-tree-train.pkl')
 
     def get_embedding_names(self, name, is_sigma=False, is_alpha=False):
         if is_sigma:
