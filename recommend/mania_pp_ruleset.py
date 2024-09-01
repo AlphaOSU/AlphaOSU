@@ -40,62 +40,64 @@ class ManiaPP(PPRuleSet):
         pass_feature_list_index = defaultdict(lambda: [])
 
         # estimate pp incre
-        for i, row in enumerate(data.itertuples(name=None)):
-            (bid, mod), star, pred_score, _, _, od, count, speed, variant, _, _, _ = row
-            pass_feature_list[f"{speed}/{variant}"].append(bid)
-            pass_feature_list_index[f"{speed}/{variant}"].append(i)
-            # break prob
-            true_speed, true_score, true_pp, true_star, true_score_id = user_bp.get_score_pp(bid)
-            if true_score is not None:
-                true_pp = self.pp(true_score, true_star, od, count)
-            if true_score is None:
-                break_prob = 1.0
-                probable_score = pred_score
-            else:
-                std_result = osu_utils.predict_score_std(self.connection, uid,
-                                                         variant, self.config, bid,
-                                                         self.map_mod(mod))
-                if std_result is None or true_speed != speed:
-                    probable_score = pred_score
+        with self.timing("[Rank-mania] PP"):
+            for i, row in enumerate(data.itertuples(name=None)):
+                (bid, mod), star, pred_score, _, _, od, count, speed, variant, _, _, _ = row
+                pass_feature_list[f"{speed}/{variant}"].append(bid)
+                pass_feature_list_index[f"{speed}/{variant}"].append(i)
+                # break prob
+                true_speed, true_score, true_pp, true_star, true_score_id = user_bp.get_score_pp(bid)
+                if true_score is not None:
+                    true_pp = self.pp(true_score, true_star, od, count)
+                if true_score is None:
                     break_prob = 1.0
+                    probable_score = pred_score
                 else:
-                    score_train, score_std_train = std_result
-                    true_score_train = self.real_to_train(true_score)
-                    break_prob = 1 - stats.norm.cdf(true_score_train, loc=score_train,
-                                                    scale=score_std_train)
-                    probable_score = \
-                        integrate.quad(score_with_prob, a=true_score_train, b=np.inf,
-                                       args=(score_train, score_std_train),
-                                       epsabs=1.0)[0] / break_prob
-                    probable_score = probable_score * 0.7 + pred_score * 0.3
-            true_scores.append(true_score)
-            true_pps.append(true_pp)
-            true_speeds.append(true_speed)
-            probable_scores.append(probable_score)
-            break_probs.append(round(break_prob, 6))
-            true_score_ids.append(int(true_score_id) if true_score_id is not None else None)
-            # pp gain
-            if probable_score is not None:
-                pp_gain_beatmap = self.pp(probable_score, star, od, count)
-                pp_gain_beatmap = round(pp_gain_beatmap, 3)
-                probable_pps.append(pp_gain_beatmap)
-                user_bp2 = user_bp.copy()
-                user_bp2.update(bid, 0, probable_score, pp_gain_beatmap, 0)
-                pp_gain = user_bp2.get_pp() - user_true_pp
-                pp_gain = max(0, pp_gain)
-                pp_gains.append(pp_gain)
-            else:
-                probable_pps.append(None)
-                pp_gains.append(None)
+                    std_result = osu_utils.predict_score_std(self.connection, uid,
+                                                            variant, self.config, bid,
+                                                            self.map_mod(mod))
+                    if std_result is None or true_speed != speed:
+                        probable_score = pred_score
+                        break_prob = 1.0
+                    else:
+                        score_train, score_std_train = std_result
+                        true_score_train = self.real_to_train(true_score)
+                        break_prob = 1 - stats.norm.cdf(true_score_train, loc=score_train,
+                                                        scale=score_std_train)
+                        probable_score = \
+                            integrate.quad(score_with_prob, a=true_score_train, b=np.inf,
+                                        args=(score_train, score_std_train),
+                                        epsabs=1.0)[0] / break_prob
+                        probable_score = probable_score * 0.7 + pred_score * 0.3
+                true_scores.append(true_score)
+                true_pps.append(true_pp)
+                true_speeds.append(true_speed)
+                probable_scores.append(probable_score)
+                break_probs.append(round(break_prob, 6))
+                true_score_ids.append(int(true_score_id) if true_score_id is not None else None)
+                # pp gain
+                if probable_score is not None:
+                    pp_gain_beatmap = self.pp(probable_score, star, od, count)
+                    pp_gain_beatmap = round(pp_gain_beatmap, 3)
+                    probable_pps.append(pp_gain_beatmap)
+                    user_bp2 = user_bp.copy()
+                    user_bp2.update(bid, 0, probable_score, pp_gain_beatmap, 0)
+                    pp_gain = user_bp2.get_pp() - user_true_pp
+                    pp_gain = max(0, pp_gain)
+                    pp_gains.append(pp_gain)
+                else:
+                    probable_pps.append(None)
+                    pp_gains.append(None)
 
         # calculate pass prob
         pass_probs = np.ones(len(probable_scores))
         for key in pass_feature_list:
-            speed, variant = key.split("/")
-            probs = train_pass_kernel.estimate_pass_probability(uid, variant,
-                                                                pass_feature_list[key], speed,
-                                                                self.config, self.connection)
-            pass_probs[pass_feature_list_index[key]] = probs
+            with self.timing(f"[Rank-mania] pass ({key})"):
+                speed, variant = key.split("/")
+                probs = train_pass_kernel.estimate_pass_probability(uid, variant,
+                                                                    pass_feature_list[key], speed,
+                                                                    self.config, self.connection)
+                pass_probs[pass_feature_list_index[key]] = probs
 
         data['pred_score (breaking)'] = probable_scores
         data['pred_pp (breaking)'] = probable_pps
@@ -108,15 +110,16 @@ class ManiaPP(PPRuleSet):
         data['true_score_id'] = true_score_ids
         data['pp_gain_expect'] = data['pp_gain (breaking)'] * data['break_prob'] * data['pass_prob']
 
-        data = pd.DataFrame(data,
-                            columns=['name', 'star',
-                                     'true_score', 'true_pp',
-                                     'pred_score', 'break_prob',
-                                     'pred_score (breaking)', 'pred_pp (breaking)',
-                                     'pp_gain (breaking)', 'pass_prob', 'cs', 'set_id',
-                                     'valid_count', 'true_speed',
-                                     'pp_gain_expect', 'pred_pp', 'true_score_id'])
-        data.sort_values(by="pp_gain_expect", ascending=False, inplace=True)
+        with self.timing(f"[Rank-mania] sort"):
+            data = pd.DataFrame(data,
+                                columns=['name', 'star',
+                                        'true_score', 'true_pp',
+                                        'pred_score', 'break_prob',
+                                        'pred_score (breaking)', 'pred_pp (breaking)',
+                                        'pp_gain (breaking)', 'pass_prob', 'cs', 'set_id',
+                                        'valid_count', 'true_speed',
+                                        'pp_gain_expect', 'pred_pp', 'true_score_id'])
+            data.sort_values(by="pp_gain_expect", ascending=False, inplace=True)
         return data
 
 
@@ -144,53 +147,56 @@ class ManiaPP(PPRuleSet):
             UserEmbedding.TABLE_NAME + "." + UserEmbedding.GAME_MODE: ('=', "mania"),
         }
         self.post_process_query_param(query_params, required_mods)
-        if 4 in key_count:
-            query_params[UserEmbedding.TABLE_NAME + "." + UserEmbedding.VARIANT] = ('=', '4k')
-            query_params[Beatmap.CS] = ('=', 4)
-            cursor += list(
-                osu_utils.predict_score(self.connection, query_params, self.config.embedding_size,
-                                        projection=base_projection))
-        if 7 in key_count:
-            query_params[UserEmbedding.TABLE_NAME + "." + UserEmbedding.VARIANT] = ('=', '7k')
-            query_params[Beatmap.CS] = ('=', 7)
-            cursor += list(
-                osu_utils.predict_score(self.connection, query_params, self.config.embedding_size,
-                                        projection=base_projection))
-        for x in cursor:
-            score, bid, speed, variant, od, count1, count2, \
-            star_ht, star_nm, star_dt, cs, version, name, set_id, \
-            count_ht, count_nm, count_dt = x[:len(base_projection) + 1]
-            # print(int(bid))
-            if len(beatmap_ids) != 0 and int(bid) not in beatmap_ids:
-                continue
-            if speed == 1:
-                star = star_dt
-                mod = 'DT'
-                count = count_dt
-            elif speed == 0:
-                star = star_nm
-                mod = 'NM'
-                count = count_nm
-            else:
-                star = star_ht
-                mod = 'HT'
-                count = count_ht
-            if max_star is not None:
-                if star > max_star:
+        with self.timing(f"[Recall-mania] predict score 4k"):
+            if 4 in key_count:
+                query_params[UserEmbedding.TABLE_NAME + "." + UserEmbedding.VARIANT] = ('=', '4k')
+                query_params[Beatmap.CS] = ('=', 4)
+                cursor += list(
+                    osu_utils.predict_score(self.connection, query_params, self.config.embedding_size,
+                                            projection=base_projection))
+        with self.timing(f"[Recall-mania] predict score 7k"):
+            if 7 in key_count:
+                query_params[UserEmbedding.TABLE_NAME + "." + UserEmbedding.VARIANT] = ('=', '7k')
+                query_params[Beatmap.CS] = ('=', 7)
+                cursor += list(
+                    osu_utils.predict_score(self.connection, query_params, self.config.embedding_size,
+                                            projection=base_projection))
+        with self.timing(f"[Recall-mania] post process score"):
+            for x in cursor:
+                score, bid, speed, variant, od, count1, count2, \
+                star_ht, star_nm, star_dt, cs, version, name, set_id, \
+                count_ht, count_nm, count_dt = x[:len(base_projection) + 1]
+                # print(int(bid))
+                if len(beatmap_ids) != 0 and int(bid) not in beatmap_ids:
                     continue
-            if star < min_star:
-                continue
-            data_list.append([bid, mod, star, score, 0, self.map_beatmap_name(name, version),
-                              od, count1 + count2, speed, variant, cs, set_id, count])
-        data = pd.DataFrame(data_list,
-                            columns=['id', "mod", "star", "pred_score", "pred_pp", "name",
-                                     'od', 'count', 'speed', 'variant', 'cs', 'set_id',
-                                     'valid_count'])
-        data['pred_score'] = self.train_to_real(data['pred_score'].to_numpy())
-        data['pred_pp'] = self.pp(data['pred_score'].to_numpy(),
-                                  data['star'].to_numpy(),
-                                  data['od'].to_numpy(),
-                                  data['count'].to_numpy())
+                if speed == 1:
+                    star = star_dt
+                    mod = 'DT'
+                    count = count_dt
+                elif speed == 0:
+                    star = star_nm
+                    mod = 'NM'
+                    count = count_nm
+                else:
+                    star = star_ht
+                    mod = 'HT'
+                    count = count_ht
+                if max_star is not None:
+                    if star > max_star:
+                        continue
+                if star < min_star:
+                    continue
+                data_list.append([bid, mod, star, score, 0, self.map_beatmap_name(name, version),
+                                od, count1 + count2, speed, variant, cs, set_id, count])
+            data = pd.DataFrame(data_list,
+                                columns=['id', "mod", "star", "pred_score", "pred_pp", "name",
+                                        'od', 'count', 'speed', 'variant', 'cs', 'set_id',
+                                        'valid_count'])
+            data['pred_score'] = self.train_to_real(data['pred_score'].to_numpy())
+            data['pred_pp'] = self.pp(data['pred_score'].to_numpy(),
+                                    data['star'].to_numpy(),
+                                    data['od'].to_numpy(),
+                                    data['count'].to_numpy())
         return data
 
 
