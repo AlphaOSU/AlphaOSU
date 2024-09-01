@@ -4,6 +4,7 @@ import pickle
 from sklearn.linear_model import BayesianRidge
 from sklearn.metrics import r2_score, mean_absolute_error
 from tqdm import tqdm
+import os
 
 import osu_utils
 from data import data_process
@@ -132,12 +133,14 @@ def train_embedding(key, get_data_method, epoch, config,
         time_assign = time.time() - time_assign
         training_statistics.as_times.append(time_assign)
         as_times_mean = np.mean(training_statistics.as_times) * 1000
-        pbar.set_description(f"[{epoch}] {training_statistics.desc} io:{io_time_mean:.2f}ms "
-                             f"ls:{ls_time_mean:.2f}ms "
-                             f"as:{as_times_mean:.2f}ms "
-                             f"r2:{mean(training_statistics.r2_list):.4f} "
-                             f"r2_adj:{mean(training_statistics.r2_adj_list):.4f} "
-                             f"mse:{mean(training_statistics.mse_list):.4f}")
+        description = (f"[{epoch}] {training_statistics.desc} io:{io_time_mean:.2f}ms "
+            f"ls:{ls_time_mean:.2f}ms "
+            f"as:{as_times_mean:.2f}ms "
+            f"r2:{mean(training_statistics.r2_list):.4f} "
+            f"r2_adj:{mean(training_statistics.r2_adj_list):.4f} "
+            f"mse:{mean(training_statistics.mse_list):.4f}"
+        )
+        pbar.set_description(description)
 
 
 def train_personal_embedding(key, weights, config, connection,
@@ -291,9 +294,9 @@ def debug_mod_embedding(mod_embedding: EmbeddingData, config: NetworkConfig):
 def train_score_by_als(config: NetworkConfig, connection: sqlite3.Connection):
 
     with connection:
-        # repository.execute_sql(connection, f"DROP TABLE IF EXISTS {BeatmapEmbedding.TABLE_NAME}")
-        # repository.execute_sql(connection, f"DROP TABLE IF EXISTS {UserEmbedding.TABLE_NAME}")
-        # repository.execute_sql(connection, f"DROP TABLE IF EXISTS {ModEmbedding.TABLE_NAME}")
+        repository.execute_sql(connection, f"DROP TABLE IF EXISTS {BeatmapEmbedding.TABLE_NAME}")
+        repository.execute_sql(connection, f"DROP TABLE IF EXISTS {UserEmbedding.TABLE_NAME}")
+        repository.execute_sql(connection, f"DROP TABLE IF EXISTS {ModEmbedding.TABLE_NAME}")
         repository.create_index(connection, "score_user", Score.TABLE_NAME, [Score.USER_ID])
         repository.create_index(connection, "score_beatmap", Score.TABLE_NAME, [Score.BEATMAP_ID])
     previous_r2 = -10000
@@ -326,7 +329,7 @@ def train_score_by_als(config: NetworkConfig, connection: sqlite3.Connection):
 
         # train beatmap
         statistics = TrainingStatistics("beatmap", len(weights.beatmap_embedding.key_to_embed_id))
-        pbar = tqdm(weights.beatmap_embedding.key_to_embed_id.keys(), desc=statistics.desc)
+        pbar = tqdm(sorted(weights.beatmap_embedding.key_to_embed_id.keys()), desc=statistics.desc)
         for beatmap_key in pbar:
             train_embedding(beatmap_key, provide_beatmap_data, epoch, config,
                             weights.beatmap_embedding, statistics, pbar, weights.user_embedding,
@@ -335,7 +338,7 @@ def train_score_by_als(config: NetworkConfig, connection: sqlite3.Connection):
 
         # train user
         statistics = TrainingStatistics("user", len(weights.user_embedding.key_to_embed_id))
-        pbar = tqdm(weights.user_embedding.key_to_embed_id.keys(), desc=statistics.desc)
+        pbar = tqdm(sorted(weights.user_embedding.key_to_embed_id.keys()), desc=statistics.desc)
         for user_key in pbar:
             train_embedding(user_key, provide_user_data, epoch, config,
                             weights.user_embedding, statistics, pbar, weights.beatmap_embedding,
@@ -344,6 +347,7 @@ def train_score_by_als(config: NetworkConfig, connection: sqlite3.Connection):
 
         cur_r2 = mean(statistics.r2_adj_list)
         if previous_r2 >= cur_r2:
+            provider.on_finish()
             break
         previous_r2 = cur_r2
         data_process.save_embedding(connection, weights.beatmap_embedding, config,
@@ -360,7 +364,7 @@ def train_score_by_als(config: NetworkConfig, connection: sqlite3.Connection):
         connection.commit()
 
         # train mod
-        if epoch >= 2 and epoch <= 15:
+        if epoch >= 2 and epoch <= 3:
             statistics = TrainingStatistics("mod", len(weights.mod_embedding.key_to_embed_id))
             pbar = tqdm(weights.mod_embedding.key_to_embed_id.keys(), desc=statistics.desc)
             for mod_key in pbar:
@@ -368,6 +372,7 @@ def train_score_by_als(config: NetworkConfig, connection: sqlite3.Connection):
                                 weights.mod_embedding, statistics, pbar, weights.user_embedding,
                                 weights.beatmap_embedding, cachable=False)
             tqdm.write(pbar.desc)
+            previous_r2 = -10000
 
             debug_mod_embedding(weights.mod_embedding, config)
 

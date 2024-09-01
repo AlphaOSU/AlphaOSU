@@ -56,3 +56,9 @@ class BaseScoreDataProvider(metaclass=ABCMeta):
         """
         pass
 
+
+    def on_finish(self):
+        """
+        invoked when finish training
+        """
+        pass

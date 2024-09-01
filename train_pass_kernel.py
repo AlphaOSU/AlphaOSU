@@ -34,7 +34,7 @@ def construct_nearest_neighbor(config: NetworkConfig):
     # find NearestNeighbors
     print("Fitting")
     nbrs = NearestNeighbors(n_neighbors=150, n_jobs=-1).fit(user_embs)
-    with open(config.ball_tree_path, 'wb') as f:
+    with open(config.ball_tree_path_train, 'wb') as f:
         pickle.dump((nbrs, user_ids, first_variant), f)
     print("Find neighbors")
     nbrs_distance, nbrs_index = nbrs.kneighbors(user_embs)
@@ -58,8 +58,14 @@ def construct_nearest_neighbor(config: NetworkConfig):
             UserEmbedding.GAME_MODE: e[1],
             UserEmbedding.VARIANT: e[2]
         })
-    with connection:
-        repository.update(connection, UserEmbedding.TABLE_NAME, puts, wheres)
+        if len(puts) >= 256:
+            with connection:
+                repository.update(connection, UserEmbedding.TABLE_NAME, puts, wheres)
+            puts = []
+            wheres = []
+    if len(puts) > 0:
+        with connection:
+            repository.update(connection, UserEmbedding.TABLE_NAME, puts, wheres)
 
 
 def estimate_pass_probability(uid, variant, beatmap_ids, speed, config: NetworkConfig,
@@ -86,7 +92,9 @@ def estimate_pass_probability(uid, variant, beatmap_ids, speed, config: NetworkC
                                                         }).fetchone()
     cur_nbrs_ids = repository.db_to_np(cur_nbrs_ids)
     cur_nbrs_distance = repository.db_to_np(cur_nbrs_distance)
-    cur_nbrs_weights = np.exp(-cur_nbrs_distance / (2 * config.pass_band_width ** 2))
+    cur_nbrs_distance = np.clip(cur_nbrs_distance - np.partition(cur_nbrs_distance, 3)[3], 0, 500) # remove the 3rd smaller
+    # cur_nbrs_weights = np.exp(-cur_nbrs_distance / (2 * config.pass_band_width ** 2))
+    cur_nbrs_weights = 1 / (cur_nbrs_distance + 1) ** config.pass_band_width
     scores = np.zeros(len(beatmap_ids), dtype=np.float32)
     played_flag = np.zeros(len(beatmap_ids), dtype=np.float32)
     beatmap_id_to_score_index = dict([(b, i) for (i, b) in enumerate(beatmap_ids)])
