@@ -42,7 +42,7 @@ class PPRuleSet():
 
     def export_profile(self):
         content = "===================="
-        for name, duration in self.profile:
-            content += (f"{name}: {duration:.3f} s")
+        for name, duration in self.profile.items():
+            content += (f"{name}: {duration:.3f} s\n")
         content += "===================="
         return content

@@ -8,44 +8,47 @@ from score.provider import *
 class STDScoreDataProvider(BaseScoreDataProvider):
 
     def __init__(self, weights: ScoreModelWeight, config: NetworkConfig,
-                 connection: sqlite3.Connection):
+                 connection: sqlite3.Connection, online=False):
         super().__init__(weights, config, connection)
         self.dt_int = osu_utils.MOD_INT_MAPPING["DT"]
         self.hr_int = osu_utils.MOD_INT_MAPPING["HR"]
         self.hd_int = osu_utils.MOD_INT_MAPPING["HD"]
         self.beatmap_max_pp = {}
-
-        cursor = repository.select(connection, Beatmap.TABLE_NAME,
-                                   project=[Beatmap.ID, Beatmap.MOD_MAX_PP])
-        for (bid, max_pp) in cursor:
-            max_pp = json.loads(max_pp)
-            self.beatmap_max_pp[bid] = max_pp
-
         # filter user/beatmap that have a low count
         self.dirty_user = set()
         self.dirty_beatmap = set()
 
-        # create Score_b sorted by beatmap
-        with connection:
-            print("Create Score_b")
-            connection.execute("DROP TABLE IF EXISTS Score_b")
-            connection.execute(f"CREATE TABLE Score_b as "
-                               f"SELECT {Score.USER_ID}, {Score.BEATMAP_ID}, "
-                               f"{Score.PP}, {Score.IS_DT}, {Score.IS_HR}, {Score.IS_HD} from {Score.TABLE_NAME} "
-                               f"WHERE NOT {Score.IS_EZ} AND NOT {Score.IS_FL} AND NOT {Score.IS_HT} "
-                               f"ORDER BY ({Score.BEATMAP_ID} / 1000)")
-            print("Index Score_b")
-            repository.create_index(connection, "score_b_beatmap", "Score_b", [Score.BEATMAP_ID])
+        self.online = online
 
-            print("Create Score_u")
-            connection.execute("DROP TABLE IF EXISTS Score_u")
-            connection.execute(f"CREATE TABLE Score_u as "
-                               f"SELECT {Score.USER_ID}, {Score.BEATMAP_ID}, "
-                               f"{Score.PP}, {Score.IS_DT}, {Score.IS_HR}, {Score.IS_HD} from {Score.TABLE_NAME} "
-                               f"WHERE NOT {Score.IS_EZ} AND NOT {Score.IS_FL} AND NOT {Score.IS_HT} "
-                               f"ORDER BY ({Score.USER_ID} / 1000)")
-            print("Index Score_u")
-            repository.create_index(connection, "score_u_user", "Score_u", [Score.USER_ID])
+        if not online:
+            cursor = repository.select(connection, Beatmap.TABLE_NAME,
+                                    project=[Beatmap.ID, Beatmap.MOD_MAX_PP])
+            for (bid, max_pp) in cursor:
+                max_pp = json.loads(max_pp)
+                self.beatmap_max_pp[bid] = max_pp
+
+
+            # create Score_b sorted by beatmap
+            with connection:
+                print("Create Score_b")
+                connection.execute("DROP TABLE IF EXISTS Score_b")
+                connection.execute(f"CREATE TABLE Score_b as "
+                                f"SELECT {Score.USER_ID}, {Score.BEATMAP_ID}, "
+                                f"{Score.PP}, {Score.IS_DT}, {Score.IS_HR}, {Score.IS_HD} from {Score.TABLE_NAME} "
+                                f"WHERE NOT {Score.IS_EZ} AND NOT {Score.IS_FL} AND NOT {Score.IS_HT} "
+                                f"ORDER BY ({Score.BEATMAP_ID} / 1000)")
+                print("Index Score_b")
+                repository.create_index(connection, "score_b_beatmap", "Score_b", [Score.BEATMAP_ID])
+
+                print("Create Score_u")
+                connection.execute("DROP TABLE IF EXISTS Score_u")
+                connection.execute(f"CREATE TABLE Score_u as "
+                                f"SELECT {Score.USER_ID}, {Score.BEATMAP_ID}, "
+                                f"{Score.PP}, {Score.IS_DT}, {Score.IS_HR}, {Score.IS_HD} from {Score.TABLE_NAME} "
+                                f"WHERE NOT {Score.IS_EZ} AND NOT {Score.IS_FL} AND NOT {Score.IS_HT} "
+                                f"ORDER BY ({Score.USER_ID} / 1000)")
+                print("Index Score_u")
+                repository.create_index(connection, "score_u_user", "Score_u", [Score.USER_ID])
 
     def get_mod_int(self, is_dt, is_hr, is_hd):
         mod_int = 0
@@ -61,9 +64,10 @@ class STDScoreDataProvider(BaseScoreDataProvider):
         user_id, user_mode, user_variant = user_key.split("-")
         if user_mode != self.config.game_mode:
             return None
+        table_name = f"{Score.TABLE_NAME}" if self.online else f"{Score.TABLE_NAME}_u"
         sql = (
             f"SELECT {Score.BEATMAP_ID}, {Score.PP}, {Score.IS_DT}, {Score.IS_HR}, {Score.IS_HD} "
-            f"FROM {Score.TABLE_NAME}_u "
+            f"FROM {table_name} "
             f"WHERE {Score.USER_ID} == {user_id} "
             f"AND {Score.PP} >= 1 "
             # f"AND NOT {Score.IS_EZ} AND NOT {Score.IS_FL} AND NOT {Score.IS_HT}"
@@ -78,6 +82,13 @@ class STDScoreDataProvider(BaseScoreDataProvider):
                 continue
             if int(bid) in self.dirty_beatmap:
                 continue
+            if self.online:
+                cursor = repository.select(self.connection, Beatmap.TABLE_NAME,
+                                        project=[Beatmap.ID, Beatmap.MOD_MAX_PP], 
+                                        where={Beatmap.ID: bid})
+                for (cur_bid, cur_max_pp) in cursor:
+                    cur_max_pp = json.loads(cur_max_pp)
+                    self.beatmap_max_pp[cur_bid] = cur_max_pp
             max_pp = self.beatmap_max_pp[int(bid)][mod_int]
             # assert pp <= max_pp, f"PP = {pp}, mod = {mod_int}, but max_pp is {self.beatmap_max_pp[bid]}"
             pp = osu_utils.map_osu_pp(pp, real_to_train=True, max_pp=max_pp)
